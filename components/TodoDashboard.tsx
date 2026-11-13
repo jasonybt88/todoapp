@@ -2,10 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CreateTodoInput, Priority, Subtask, Todo, UpdateTodoInput } from "@/lib/db";
+import type {
+  CreateTodoInput,
+  Priority,
+  RecurrencePattern,
+  Subtask,
+  Todo,
+  UpdateTodoInput,
+} from "@/lib/db";
 import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
 import { ExportImportToolbar } from "@/components/ExportImportToolbar";
+import { TodoFilters } from "@/components/TodoFilters";
 import { requestJson } from "@/lib/client-http";
+import { applyFilters, DEFAULT_FILTER_STATE, type FilterState } from "@/lib/filters";
+import { useDebounce } from "@/lib/hooks/useDebounce";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
@@ -20,6 +30,13 @@ interface EditDraft {
   dueDate: string;
   priority: Priority;
   reminderMinutes: number | null;
+  isRecurring: boolean;
+  recurrencePattern: RecurrencePattern;
+}
+
+interface UpdateTodoResponse {
+  todo: Todo;
+  nextInstance?: Todo;
 }
 
 function ReminderSelect({
@@ -96,7 +113,11 @@ function TodoRow({
   nextTemporaryId: () => number;
 }) {
   return (
-    <li className={`todo-item${todo.completed ? " todo-completed" : ""}`} data-testid="todo-card">
+    <li
+      className={`todo-item${todo.completed ? " todo-completed" : ""}`}
+      data-testid="todo-card"
+      data-todo-id={todo.id}
+    >
       <label className="todo-main">
         <input
           type="checkbox"
@@ -123,6 +144,9 @@ function TodoRow({
         >
           {PRIORITY_LABELS[todo.priority]}
         </span>
+        {todo.is_recurring && todo.recurrence_pattern && (
+          <span className="recurrence-badge">🔄 {todo.recurrence_pattern}</span>
+        )}
         <button type="button" onClick={() => onEdit(todo)} aria-label={`Edit ${todo.title}`}>
           Edit
         </button>
@@ -145,12 +169,14 @@ function TodoRow({
 export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState("");
-  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTER_STATE });
+  const [debouncedSearch, setDebouncedSearch] = useDebounce(filters.search);
   const [priority, setPriority] = useState<Priority>("medium");
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const [dueDate, setDueDate] = useState("");
   const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const createDraftRevision = useRef(0);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrencePattern, setRecurrencePattern] = useState<RecurrencePattern>("daily");
   const deletedTodoIds = useRef(new Set<number>());
   const dashboardActive = useRef(true);
   const nextSubtaskId = useRef(-1);
@@ -217,14 +243,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [editing]);
 
-  const sections = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    const visible = todos.filter((todo) =>
-      (priorityFilter === "all" || todo.priority === priorityFilter) &&
-      (!query || todo.title.toLocaleLowerCase().includes(query) ||
-        todo.subtasks.some((subtask) => subtask.title.toLocaleLowerCase().includes(query))));
-    return sectionTodos(visible, now);
-  }, [todos, now, search, priorityFilter]);
+  const tags = useMemo(() => {
+    const found = new Map<number, Todo["tags"][number]>();
+    for (const todo of todos) for (const tag of todo.tags ?? []) found.set(tag.id, tag);
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [todos]);
+  const { priority: filterPriority, tagId, completion, dueDateFrom, dueDateTo } = filters;
+  const sections = useMemo(() => sectionTodos(applyFilters(todos, {
+    search: debouncedSearch, priority: filterPriority, tagId, completion, dueDateFrom, dueDateTo,
+  }), now), [todos, now, debouncedSearch, filterPriority, tagId, completion, dueDateFrom, dueDateTo]);
+  const matchingCount = sections.overdue.length + sections.pending.length + sections.completed.length;
 
   function updateSubtasks(id: number, update: (subtasks: Subtask[]) => Subtask[]) {
     setTodos((current) => current.map((todo) =>
@@ -256,12 +284,18 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       setError(validatedDueDate.error);
       return;
     }
+    if (isRecurring && validatedDueDate.value === null) {
+      setError("Recurring todos require a due date");
+      return;
+    }
 
     const input: CreateTodoInput = {
       title: validatedTitle.value,
       priority,
       due_date: validatedDueDate.value,
       reminder_minutes: reminderMinutes,
+      is_recurring: isRecurring,
+      recurrence_pattern: isRecurring ? recurrencePattern : null,
     };
     const temporaryId = -Date.now();
     const optimisticTodo: Todo = {
@@ -271,8 +305,8 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       completed: false,
       due_date: input.due_date ?? null,
       priority,
-      is_recurring: false,
-      recurrence_pattern: null,
+      is_recurring: isRecurring,
+      recurrence_pattern: isRecurring ? recurrencePattern : null,
       reminder_minutes: reminderMinutes,
       last_notification_sent: null,
       created_at: getSingaporeNow().toISOString(),
@@ -295,6 +329,8 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         setPriority("medium");
         setDueDate("");
         setReminderMinutes(null);
+        setIsRecurring(false);
+        setRecurrencePattern("daily");
       }
     } catch (cause) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
@@ -311,11 +347,21 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       current.map((todo) => (todo.id === id ? { ...todo, ...input } : todo)),
     );
     try {
-      const saved = await requestJson<Todo>(`/api/todos/${id}`, {
+      const result = await requestJson<UpdateTodoResponse>(`/api/todos/${id}`, {
         ...todoRequest("PUT", input),
       });
-      setTodos((current) => current.map((todo) =>
-        todo.id === id ? { ...saved, subtasks: todo.subtasks } : todo));
+      setTodos((current) => {
+        const updated = current.map((todo) =>
+          todo.id === id ? { ...result.todo, subtasks: todo.subtasks } : todo,
+        );
+        if (
+          result.nextInstance &&
+          !updated.some((todo) => todo.id === result.nextInstance?.id)
+        ) {
+          updated.push(result.nextInstance);
+        }
+        return updated;
+      });
       return true;
     } catch (cause) {
       setTodos((current) =>
@@ -355,6 +401,8 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       dueDate: todo.due_date ? formatSingaporeDateTimeInput(todo.due_date) : "",
       priority: todo.priority,
       reminderMinutes: todo.reminder_minutes,
+      isRecurring: todo.is_recurring,
+      recurrencePattern: todo.recurrence_pattern ?? "daily",
     });
   }
 
@@ -374,6 +422,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       setError(validatedDueDate.error);
       return;
     }
+    if (editDraft.isRecurring && validatedDueDate.value === null) {
+      setError("Recurring todos require a due date");
+      return;
+    }
 
     const saved = await updateTodo(editing.id, {
       title: validatedTitle.value,
@@ -382,6 +434,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       ...(editDraft.reminderMinutes !== editing.reminder_minutes
         ? { reminder_minutes: editDraft.reminderMinutes }
         : {}),
+      is_recurring: editDraft.isRecurring,
+      recurrence_pattern: editDraft.isRecurring
+        ? editDraft.recurrencePattern
+        : null,
     });
     if (saved) {
       setEditing(null);
@@ -464,6 +520,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
             createDraftRevision.current += 1;
             setDueDate(event.target.value);
             if (!event.target.value) setReminderMinutes(null);
+            if (!event.target.value) setIsRecurring(false);
           }}
         />
         <ReminderSelect
@@ -478,26 +535,39 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <button className="primary-button" type="submit" disabled={loading}>
           Add
         </button>
+        <div className="recurrence-fields">
+          <label>
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              disabled={!dueDate}
+              onChange={(event) => {
+                createDraftRevision.current += 1;
+                setIsRecurring(event.target.checked);
+              }}
+            />
+            Repeat
+          </label>
+          {isRecurring && (
+            <select
+              aria-label="Recurrence pattern"
+              value={recurrencePattern}
+              onChange={(event) => {
+                createDraftRevision.current += 1;
+                setRecurrencePattern(event.target.value as RecurrencePattern);
+              }}
+            >
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          )}
+          {!dueDate && <span>Set a due date to enable repeat</span>}
+        </div>
       </form>
 
-      <div className="todo-filters">
-        <label htmlFor="priority-filter">Filter by priority</label>
-        <select
-          id="priority-filter"
-          value={priorityFilter}
-          onChange={(event) =>
-            setPriorityFilter(event.target.value as Priority | "all")
-          }
-        >
-          <option value="all">All Priorities</option>
-          <option value="high">High Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="low">Low Priority</option>
-        </select>
-      </div>
-      <input className="todo-search" type="search" value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search todos and subtasks" aria-label="Search todos and subtasks" />
+      <TodoFilters filters={filters} tags={tags} onChange={setFilters} onImmediateSearch={setDebouncedSearch} />
 
       {error && (
         <p className="message error-message" role="alert">
@@ -509,6 +579,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       )}
       {loading ? (
         <p className="muted" role="status">Loading todos...</p>
+      ) : todos.length === 0 ? (
+        <p className="muted">You have no todos yet.</p>
+      ) : matchingCount === 0 ? (
+        <p className="muted">No todos match your filters.</p>
       ) : (
         <div className="todo-sections">
           <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
@@ -570,6 +644,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                     ...editDraft,
                     dueDate: event.target.value,
                     reminderMinutes: event.target.value ? editDraft.reminderMinutes : null,
+                    isRecurring: event.target.value ? editDraft.isRecurring : false,
                   })
                 }
               />
@@ -579,6 +654,41 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                 disabled={!editDraft.dueDate}
                 onChange={(value) => setEditDraft({ ...editDraft, reminderMinutes: value })}
               />
+              <div className="recurrence-fields">
+                <label htmlFor="edit-recurring">
+                  <input
+                    id="edit-recurring"
+                    type="checkbox"
+                    checked={editDraft.isRecurring}
+                    disabled={!editDraft.dueDate}
+                    onChange={(event) =>
+                      setEditDraft({
+                        ...editDraft,
+                        isRecurring: event.target.checked,
+                      })
+                    }
+                  />
+                  Repeat
+                </label>
+                {editDraft.isRecurring && (
+                  <select
+                    aria-label="Recurrence pattern"
+                    value={editDraft.recurrencePattern}
+                    onChange={(event) =>
+                      setEditDraft({
+                        ...editDraft,
+                        recurrencePattern: event.target.value as RecurrencePattern,
+                      })
+                    }
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                )}
+                {!editDraft.dueDate && <span>Set a due date to enable repeat</span>}
+              </div>
               <div className="edit-actions">
                 <button className="primary-button" type="submit">Update</button>
                 <button
@@ -624,13 +734,11 @@ function TodoSection({
   nextTemporaryId: () => number;
 }) {
   const headingId = `section-${title.toLowerCase()}`;
+  if (todos.length === 0) return null;
   return (
     <section className="todo-section" aria-labelledby={headingId}>
       <h3 id={headingId}>{title} ({todos.length})</h3>
-      {todos.length === 0 ? (
-        <p className="empty-section">No {title.toLowerCase()} todos.</p>
-      ) : (
-        <ul className="todo-list">
+      <ul className="todo-list">
           {todos.map((todo) => (
             <TodoRow
               key={todo.id}
@@ -645,8 +753,7 @@ function TodoSection({
               nextTemporaryId={nextTemporaryId}
             />
           ))}
-        </ul>
-      )}
+      </ul>
     </section>
   );
 }

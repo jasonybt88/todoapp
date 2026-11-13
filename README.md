@@ -51,6 +51,12 @@ and tag associations; imports assign new IDs, reuse tags by case-insensitive
 name, and create new todos rather than merging with existing ones. CSV files are
 one-way exports and cannot be imported.
 
+Search and quick priority and tag filters combine with the Advanced completion
+and Singapore-local due-date filters. Save a named filter in Advanced to reuse
+it in the same browser; saved filters are not synced across devices. The tag
+picker currently lists tags attached to loaded todos; tag management is not yet
+available. If a saved tag is unavailable, applying its preset uses all tags.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
@@ -72,11 +78,16 @@ never commit or share it.
 ```powershell
 npm run todo -- list
 npm run todo -- create "Prepare report" --priority high
+npm run todo -- create "Pay rent" --due-date 2026-12-01T01:00:00.000Z --repeat monthly
 npm run todo -- get 12
 npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
+npm run todo -- update 12 --no-repeat
 npm run todo -- delete 12
 ```
+
+Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
+`yearly`. Completing one creates its next occurrence.
 
 ## Checks and release
 

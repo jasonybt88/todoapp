@@ -82,7 +82,7 @@ test("checks and re-arms reminders while enforcing authentication and input vali
   expect((await page.request.put(`/api/todos/${todo.id}`, { data: { last_notification_sent: sent } })).status()).toBe(200);
   expect((await (await page.request.get("/api/notifications/check")).json()).data).toEqual([]);
   const updated = await page.request.put(`/api/todos/${todo.id}`, { data: { reminder_minutes: 30 } });
-  expect((await updated.json()).last_notification_sent).toBeNull();
+  expect((await updated.json()).todo.last_notification_sent).toBeNull();
   expect((await (await page.request.get("/api/notifications/check")).json()).data).toHaveLength(1);
   const staleMark = await page.request.put(`/api/todos/${todo.id}`, {
     data: {

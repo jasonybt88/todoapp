@@ -11,6 +11,7 @@ export {
   PRIORITY_VALUES,
 } from "@/lib/priority";
 export type { Priority } from "@/lib/priority";
+import { calculateNextDueDate } from "./recurrence";
 
 export interface User {
   id: number;
@@ -419,6 +420,66 @@ function attachTodoTags(
   }
 }
 
+function updateTodoInTransaction(
+  db: Database.Database,
+  id: number,
+  input: UpdateTodoInput,
+): Todo | null {
+  const fields: Array<{ column: string; value: string | number | null }> = [];
+  if (input.title !== undefined) fields.push({ column: "title", value: input.title });
+  if (input.due_date !== undefined) fields.push({ column: "due_date", value: input.due_date });
+  if (input.priority !== undefined) fields.push({ column: "priority", value: input.priority });
+  if (input.is_recurring !== undefined) {
+    fields.push({ column: "is_recurring", value: input.is_recurring ? 1 : 0 });
+  }
+  if (input.recurrence_pattern !== undefined) {
+    fields.push({ column: "recurrence_pattern", value: input.recurrence_pattern });
+  }
+  if (input.reminder_minutes !== undefined) {
+    fields.push({ column: "reminder_minutes", value: input.reminder_minutes });
+  }
+  if (input.completed !== undefined) {
+    fields.push({ column: "completed", value: input.completed ? 1 : 0 });
+  }
+  if (input.last_notification_sent !== undefined) {
+    fields.push({
+      column: "last_notification_sent",
+      value: input.last_notification_sent,
+    });
+  } else if (input.due_date !== undefined || input.reminder_minutes !== undefined) {
+    const existing = findTodoWithRelations(id);
+    if (
+      existing &&
+      ((input.due_date !== undefined && input.due_date !== existing.due_date) ||
+        (input.reminder_minutes !== undefined &&
+          input.reminder_minutes !== existing.reminder_minutes))
+    ) {
+      fields.push({ column: "last_notification_sent", value: null });
+    }
+  }
+
+  if (fields.length > 0) {
+    const assignments = fields.map(({ column }) => `${column} = ?`);
+    assignments.push("updated_at = datetime('now')");
+    db.prepare(`UPDATE todos SET ${assignments.join(", ")} WHERE id = ?`)
+      .run(...fields.map(({ value }) => value), id);
+  } else {
+    db.prepare("UPDATE todos SET updated_at = datetime('now') WHERE id = ?").run(id);
+  }
+
+  if (input.tag_ids !== undefined) {
+    db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
+    const owner = db
+      .prepare("SELECT user_id FROM todos WHERE id = ?")
+      .get(id) as { user_id: number } | undefined;
+    if (owner && input.tag_ids.length > 0) {
+      attachTodoTags(db, id, owner.user_id, input.tag_ids);
+    }
+  }
+
+  return findTodoWithRelations(id);
+}
+
 export const todoDB = {
   create(userId: number, input: CreateTodoInput): Todo {
     const db = getDatabase();
@@ -577,60 +638,74 @@ export const todoDB = {
 
   update(id: number, input: UpdateTodoInput): Todo | null {
     const db = getDatabase();
-    const update = db.transaction(() => {
-      const fields: Array<{ column: string; value: string | number | null }> = [];
-      if (input.title !== undefined) fields.push({ column: "title", value: input.title });
-      if (input.due_date !== undefined) fields.push({ column: "due_date", value: input.due_date });
-      if (input.priority !== undefined) fields.push({ column: "priority", value: input.priority });
-      if (input.is_recurring !== undefined) {
-        fields.push({ column: "is_recurring", value: input.is_recurring ? 1 : 0 });
-      }
-      if (input.recurrence_pattern !== undefined) {
-        fields.push({ column: "recurrence_pattern", value: input.recurrence_pattern });
-      }
-      if (input.reminder_minutes !== undefined) {
-        fields.push({ column: "reminder_minutes", value: input.reminder_minutes });
-      }
-      if (input.completed !== undefined) {
-        fields.push({ column: "completed", value: input.completed ? 1 : 0 });
-      }
-      if (input.last_notification_sent !== undefined) {
-        fields.push({ column: "last_notification_sent", value: input.last_notification_sent });
-      } else if (input.due_date !== undefined || input.reminder_minutes !== undefined) {
-        const existing = findTodoWithRelations(id);
-        if (
-          existing &&
-          ((input.due_date !== undefined && input.due_date !== existing.due_date) ||
-            (input.reminder_minutes !== undefined &&
-              input.reminder_minutes !== existing.reminder_minutes))
-        ) {
-          fields.push({ column: "last_notification_sent", value: null });
-        }
-      }
-
-      if (fields.length > 0) {
-        const assignments = fields.map(({ column }) => `${column} = ?`);
-        assignments.push("updated_at = datetime('now')");
-        db.prepare(`UPDATE todos SET ${assignments.join(", ")} WHERE id = ?`)
-          .run(...fields.map(({ value }) => value), id);
-      } else {
-        db.prepare("UPDATE todos SET updated_at = datetime('now') WHERE id = ?").run(id);
-      }
-
-      if (input.tag_ids !== undefined) {
-        db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
-        const owner = db
-          .prepare("SELECT user_id FROM todos WHERE id = ?")
-          .get(id) as { user_id: number } | undefined;
-        if (owner && input.tag_ids.length > 0) {
-          attachTodoTags(db, id, owner.user_id, input.tag_ids);
-        }
-      }
-
-      return findTodoWithRelations(id);
-    });
+    const update = db.transaction(() => updateTodoInTransaction(db, id, input));
 
     return update();
+  },
+
+  updateAndCreateNextInstance(
+    id: number,
+    userId: number,
+    input: UpdateTodoInput,
+  ): { todo: Todo; nextInstance?: Todo } | null {
+    const db = getDatabase();
+    const update = db.transaction(() => {
+      const existing = findTodoWithRelations(id);
+      if (!existing || existing.user_id !== userId) {
+        return null;
+      }
+
+      const justCompleted = input.completed === true && !existing.completed;
+      const todo = updateTodoInTransaction(db, id, input);
+      if (!todo) {
+        return null;
+      }
+
+      if (
+        !justCompleted ||
+        !todo.is_recurring ||
+        !todo.recurrence_pattern ||
+        !todo.due_date
+      ) {
+        return { todo };
+      }
+
+      const nextDueDate = calculateNextDueDate(
+        todo.due_date,
+        todo.recurrence_pattern,
+      );
+      const result = db
+        .prepare(
+          `INSERT INTO todos
+            (user_id, title, due_date, priority, is_recurring, recurrence_pattern, reminder_minutes)
+           VALUES (?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          userId,
+          todo.title,
+          nextDueDate,
+          todo.priority,
+          todo.recurrence_pattern,
+          todo.reminder_minutes,
+        );
+      const nextId = Number(result.lastInsertRowid);
+      if (todo.tags.length > 0) {
+        attachTodoTags(
+          db,
+          nextId,
+          userId,
+          todo.tags.map(({ id: tagId }) => tagId),
+        );
+      }
+
+      const nextInstance = findTodoWithRelations(nextId);
+      if (!nextInstance) {
+        throw new Error("Newly created recurring todo could not be loaded");
+      }
+      return { todo, nextInstance };
+    });
+
+    return update.immediate();
   },
 
   delete(id: number): void {
