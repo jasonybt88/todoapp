@@ -1,8 +1,8 @@
 Hi everyone, start implementation now using the tutorial you reviewed:
-https://github.com/kenken64/AI-SDLC-Workshop-Day1n2/blob/main/PRPs/11-authentication-webauthn.md
+https://github.com/kenken64/AI-SDLC-Workshop-Day1n2/blob/main/PRPs/*.md
 
 The local working directory will be:
-C:\Users\jason\Downloads\AI-Augmented SDLC - From Copilot to Agentic Pipelines\Day 2\ToDoApp\todoapp
+~workingDirectory\Day 2\ToDoApp\todoapp
 
 The GitHub repository will be:
 https://github.com/jasonybt88/todoapp.git
