@@ -44,6 +44,7 @@ never commit or share it.
 npm run todo -- list
 npm run todo -- create "Prepare report" --priority high
 npm run todo -- get 12
+npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
 npm run todo -- delete 12
 ```
