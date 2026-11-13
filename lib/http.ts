@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 
+export function parsePositiveId(value: string): number | null {
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
 export function errorResponse(error: string, status: number): NextResponse {
   return NextResponse.json({ error }, { status });
 }

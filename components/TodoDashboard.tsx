@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CreateTodoInput, Priority, Todo, UpdateTodoInput } from "@/lib/db";
+import type { CreateTodoInput, Priority, Subtask, Todo, UpdateTodoInput } from "@/lib/db";
+import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
+import { requestJson } from "@/lib/client-http";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
@@ -64,22 +66,6 @@ const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Low",
 };
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
-  const data = (await response.json()) as T & { error?: string };
-
-  if (!response.ok) {
-    throw new Error(data.error ?? "The request could not be completed.");
-  }
-  return data;
-}
-
 function todoRequest(method: "PUT" | "DELETE", body?: UpdateTodoInput) {
   return {
     method,
@@ -92,11 +78,21 @@ function TodoRow({
   onToggle,
   onEdit,
   onDelete,
+  onSubtasksChange,
+  onError,
+  operations,
+  isTodoActive,
+  nextTemporaryId,
 }: {
   todo: Todo;
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
+  onError: (message: string | null) => void;
+  operations: SubtaskOperations;
+  isTodoActive: (id: number) => boolean;
+  nextTemporaryId: () => number;
 }) {
   return (
     <li className={`todo-item${todo.completed ? " todo-completed" : ""}`} data-testid="todo-card">
@@ -138,6 +134,9 @@ function TodoRow({
           Delete
         </button>
       </div>
+      <SubtaskList todoId={todo.id} subtasks={todo.subtasks}
+        onChange={(update) => onSubtasksChange(todo.id, update)} onError={onError}
+        operations={operations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
     </li>
   );
 }
@@ -145,17 +144,32 @@ function TodoRow({
 export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState("");
+  const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const [dueDate, setDueDate] = useState("");
   const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const createDraftRevision = useRef(0);
+  const deletedTodoIds = useRef(new Set<number>());
+  const dashboardActive = useRef(true);
+  const nextSubtaskId = useRef(-1);
+  const [subtaskOperations] = useState<SubtaskOperations>(() => ({
+    queues: new Map(),
+    sequences: new Map(),
+    confirmed: new Map(),
+    removed: new Set(),
+  }));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(getSingaporeNow);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const notifications = useNotifications();
+
+  useEffect(() => {
+    dashboardActive.current = true;
+    return () => { dashboardActive.current = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -197,16 +211,27 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [editing]);
 
-  const sections = useMemo(
-    () =>
-      sectionTodos(
-        todos.filter(
-          (todo) => priorityFilter === "all" || todo.priority === priorityFilter,
-        ),
-        now,
-      ),
-    [todos, now, priorityFilter],
-  );
+  const sections = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    const visible = todos.filter((todo) =>
+      (priorityFilter === "all" || todo.priority === priorityFilter) &&
+      (!query || todo.title.toLocaleLowerCase().includes(query) ||
+        todo.subtasks.some((subtask) => subtask.title.toLocaleLowerCase().includes(query))));
+    return sectionTodos(visible, now);
+  }, [todos, now, search, priorityFilter]);
+
+  function updateSubtasks(id: number, update: (subtasks: Subtask[]) => Subtask[]) {
+    setTodos((current) => current.map((todo) =>
+      todo.id === id ? { ...todo, subtasks: update(todo.subtasks) } : todo));
+  }
+
+  function isTodoActive(id: number) {
+    return dashboardActive.current && !deletedTodoIds.current.has(id);
+  }
+
+  function nextTemporaryId() {
+    return nextSubtaskId.current--;
+  }
 
   async function addTodo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -283,11 +308,12 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       const saved = await requestJson<Todo>(`/api/todos/${id}`, {
         ...todoRequest("PUT", input),
       });
-      setTodos((current) => current.map((todo) => (todo.id === id ? saved : todo)));
+      setTodos((current) => current.map((todo) =>
+        todo.id === id ? { ...saved, subtasks: todo.subtasks } : todo));
       return true;
     } catch (cause) {
       setTodos((current) =>
-        current.map((todo) => (todo.id === id ? previous : todo)),
+        current.map((todo) => (todo.id === id ? { ...previous, subtasks: todo.subtasks } : todo)),
       );
       setError(cause instanceof Error ? cause.message : "Could not update todo. Please try again.");
       return false;
@@ -300,6 +326,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
 
   async function deleteTodo(todo: Todo) {
     setError(null);
+    deletedTodoIds.current.add(todo.id);
     setTodos((current) => current.filter((item) => item.id !== todo.id));
     try {
       await requestJson<{ success: boolean }>(
@@ -307,6 +334,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         todoRequest("DELETE"),
       );
     } catch (cause) {
+      deletedTodoIds.current.delete(todo.id);
       setTodos((current) =>
         current.some((item) => item.id === todo.id) ? current : [...current, todo],
       );
@@ -451,6 +479,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           <option value="low">Low Priority</option>
         </select>
       </div>
+      <input className="todo-search" type="search" value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search todos and subtasks" aria-label="Search todos and subtasks" />
 
       {error && (
         <p className="message error-message" role="alert">
@@ -464,9 +495,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <p className="muted" role="status">Loading todos...</p>
       ) : (
         <div className="todo-sections">
-          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
-          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
-          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
+          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
+          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
+          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
         </div>
       )}
 
@@ -559,12 +590,22 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onSubtasksChange,
+  onError,
+  operations,
+  isTodoActive,
+  nextTemporaryId,
 }: {
   title: string;
   todos: Todo[];
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
+  onError: (message: string | null) => void;
+  operations: SubtaskOperations;
+  isTodoActive: (id: number) => boolean;
+  nextTemporaryId: () => number;
 }) {
   const headingId = `section-${title.toLowerCase()}`;
   return (
@@ -581,6 +622,11 @@ function TodoSection({
               onToggle={onToggle}
               onEdit={onEdit}
               onDelete={onDelete}
+              onSubtasksChange={onSubtasksChange}
+              onError={onError}
+              operations={operations}
+              isTodoActive={isTodoActive}
+              nextTemporaryId={nextTemporaryId}
             />
           ))}
         </ul>

@@ -38,7 +38,8 @@ For race-safe delivery marking, send only `last_notification_sent` and
 `notification_snapshot: { due_date, reminder_minutes }`, using the values
 returned by the check endpoint. The update returns `409` if the reminder was
 changed, completed, or already marked since the check.
-Subtask creation and tag management have separate feature contracts.
+Subtask completion is independent of its parent. Tag management has a separate
+feature contract.
 
 ## Routes
 
@@ -52,6 +53,9 @@ Subtask creation and tag management have separate feature contracts.
 | `GET` | `/api/holidays` | `200 { "holidays": Holiday[] }` | — |
 | `GET` | `/api/holidays?year=2026&month=12` | `200 { "holidays": Holiday[] }` | Optional `YYYY` and `MM` pair; results include visible adjacent calendar dates |
 | `GET` | `/api/notifications/check` | `200 { "success": true, "data": Todo[] }` | — |
+| `POST` | `/api/todos/:id/subtasks` | `201 Subtask` | `{ title }` |
+| `PUT` | `/api/subtasks/:id` | `200 Subtask` | `{ title?, completed? }` |
+| `DELETE` | `/api/subtasks/:id` | `200 { "success": true }` | — |
 
 Holiday records are global and read-only through the API. The calendar database
 seeds Singapore public holidays for 2025–2027 when initialized; the seed command
@@ -71,6 +75,11 @@ todo or one owned by another user returns the same
 
 SQLite stores booleans as integers and enables foreign keys at connection
 initialization. Deleting a todo therefore cascades to its subtasks and tag links.
+Subtask titles are trimmed and required, completion is boolean, and ownership
+is inherited from the parent todo. Missing or another user's subtasks return
+404. New positions are one greater than the current maximum; deletion leaves
+other positions unchanged. The dashboard searches todo and subtask titles
+locally among the current user's loaded todos.
 
 The notification check includes incomplete, unsent reminders whose window has
 opened, including overdue reminders. Times are compared as UTC instants; naive

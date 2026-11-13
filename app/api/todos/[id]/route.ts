@@ -5,7 +5,7 @@ import {
   type RecurrencePattern,
   type UpdateTodoInput,
 } from "@/lib/db";
-import { errorResponse, readJsonObject } from "@/lib/http";
+import { errorResponse, parsePositiveId, readJsonObject } from "@/lib/http";
 import { isReminderMinutes } from "@/lib/reminders";
 import { parseSingaporeDateTime } from "@/lib/timezone";
 import {
@@ -56,14 +56,6 @@ function isNotificationSnapshot(
     snapshot.reminder_minutes > 0;
 }
 
-function parseId(value: string): number | null {
-  if (!/^[1-9]\d*$/.test(value)) {
-    return null;
-  }
-  const id = Number(value);
-  return Number.isSafeInteger(id) ? id : null;
-}
-
 async function findOwnedTodo(id: number, userId: number) {
   const todo = todoDB.findById(id);
   return todo && todo.user_id === userId ? todo : null;
@@ -78,7 +70,7 @@ export async function GET(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }
@@ -99,7 +91,7 @@ export async function PUT(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }
@@ -240,7 +232,7 @@ export async function DELETE(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }

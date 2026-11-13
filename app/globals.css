@@ -512,12 +512,109 @@ button:disabled {
 
 .todo-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   border: 1px solid #e5e9f1;
   border-radius: 0.65rem;
   padding: 0.75rem;
+}
+
+.todo-search,
+.subtask-form input {
+  min-width: 0;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.todo-search {
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.subtasks {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.subtasks-toggle,
+.subtask-item button,
+.subtask-form button {
+  border: 0;
+  background: transparent;
+  color: #3446c4;
+  font-weight: 600;
+}
+
+.subtask-progress {
+  margin-top: 0.5rem;
+}
+
+.subtask-progress-label {
+  display: flex;
+  justify-content: space-between;
+  color: #596579;
+  font-size: 0.8rem;
+}
+
+.subtask-progress-track {
+  height: 0.5rem;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: #e5e9f1;
+}
+
+.subtask-progress-fill {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.2s;
+}
+
+.subtask-progress-fill.is-complete {
+  background: #16a34a;
+}
+
+.subtask-details {
+  margin-top: 0.5rem;
+}
+
+.subtask-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subtask-item,
+.subtask-item label,
+.subtask-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subtask-item label,
+.subtask-form input {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subtask-item button {
+  color: #a5342e;
+}
+
+.subtask-completed {
+  color: #6b7485;
+  text-decoration: line-through;
+}
+
+.subtask-form {
+  margin-top: 0.5rem;
 }
 
 .todo-main {

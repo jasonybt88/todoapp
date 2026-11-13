@@ -39,6 +39,10 @@ browser permission. Reminders are checked every 30 seconds while an app tab is
 open, including overdue reminders. They do not work with the browser closed;
 multiple tabs can occasionally produce duplicate notifications.
 
+Expand **Subtasks** on any todo to add and check off individual steps. The
+progress bar remains visible when collapsed. Parent and subtask completion are
+independent. The search field matches both todo and subtask titles.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
