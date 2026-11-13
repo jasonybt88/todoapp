@@ -61,5 +61,7 @@ Playwright uses Chromium's virtual WebAuthn authenticator. The release script
 builds the standalone Next.js app and creates `release/todoapp-standalone.tar.gz`.
 `Dockerfile` runs the production standalone server; mount `/app/data` to persist
 SQLite and provide `AUTH_SECRET`, `RP_ID`, `RP_ORIGIN`, and `RP_NAME` at runtime.
+CI builds the Docker image on feature branches and pull requests without
+publishing it. Only pushes to `main` or version tags publish images.
 
 Losing every registered passkey currently has no account recovery path.
