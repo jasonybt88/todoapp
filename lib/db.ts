@@ -44,6 +44,16 @@ export interface Tag {
   created_at: string;
 }
 
+export interface CreateTagInput {
+  name: string;
+  color?: string;
+}
+
+export interface UpdateTagInput {
+  name?: string;
+  color?: string;
+}
+
 export interface Todo {
   id: number;
   user_id: number;
@@ -356,6 +366,107 @@ function attachTodoTags(
     }
   }
 }
+
+export const tagDB = {
+  findAllByUser(userId: number): Tag[] {
+    return getDatabase()
+      .prepare(
+        `SELECT id, user_id, name, color, created_at
+         FROM tags WHERE user_id = ? ORDER BY name COLLATE NOCASE, name, id`,
+      )
+      .all(userId) as Tag[];
+  },
+
+  findById(id: number, userId: number): Tag | null {
+    const tag = getDatabase()
+      .prepare(
+        `SELECT id, user_id, name, color, created_at
+         FROM tags WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, userId) as Tag | undefined;
+
+    return tag ?? null;
+  },
+
+  create(userId: number, input: CreateTagInput): Tag {
+    const result = getDatabase()
+      .prepare("INSERT INTO tags (user_id, name, color) VALUES (?, ?, ?)")
+      .run(userId, input.name, input.color ?? "#3B82F6");
+    const tag = this.findById(Number(result.lastInsertRowid), userId);
+    if (!tag) {
+      throw new Error("Newly created tag could not be loaded");
+    }
+    return tag;
+  },
+
+  update(id: number, userId: number, input: UpdateTagInput): Tag | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const fields: Array<{ column: "name" | "color"; value: string }> = [];
+      if (input.name !== undefined) fields.push({ column: "name", value: input.name });
+      if (input.color !== undefined) fields.push({ column: "color", value: input.color });
+
+      if (fields.length > 0) {
+        const assignments = fields.map(({ column }) => `${column} = ?`);
+        db.prepare(
+          `UPDATE tags SET ${assignments.join(", ")} WHERE id = ? AND user_id = ?`,
+        ).run(...fields.map(({ value }) => value), id, userId);
+      }
+
+      return this.findById(id, userId);
+    })();
+  },
+
+  delete(id: number, userId: number): boolean {
+    const result = getDatabase()
+      .prepare("DELETE FROM tags WHERE id = ? AND user_id = ?")
+      .run(id, userId);
+    return result.changes === 1;
+  },
+
+  attachToTodo(todoId: number, tagId: number, userId: number): boolean {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const ownedTag = db
+        .prepare("SELECT 1 FROM tags WHERE id = ? AND user_id = ?")
+        .get(tagId, userId);
+      const ownedTodo = db
+        .prepare("SELECT 1 FROM todos WHERE id = ? AND user_id = ?")
+        .get(todoId, userId);
+      if (!ownedTag || !ownedTodo) {
+        return false;
+      }
+
+      db.prepare(
+        "INSERT OR IGNORE INTO todo_tags (todo_id, tag_id) VALUES (?, ?)",
+      ).run(todoId, tagId);
+      return true;
+    })();
+  },
+
+  detachFromTodo(todoId: number, tagId: number, userId: number): boolean {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const ownedTag = db
+        .prepare("SELECT 1 FROM tags WHERE id = ? AND user_id = ?")
+        .get(tagId, userId);
+      const ownedTodo = db
+        .prepare("SELECT 1 FROM todos WHERE id = ? AND user_id = ?")
+        .get(todoId, userId);
+      if (!ownedTag || !ownedTodo) {
+        return false;
+      }
+
+      db.prepare("DELETE FROM todo_tags WHERE todo_id = ? AND tag_id = ?")
+        .run(todoId, tagId);
+      return true;
+    })();
+  },
+
+  findByTodoId(todoId: number): Tag[] {
+    return findTagsByTodoId(todoId);
+  },
+};
 
 export const todoDB = {
   create(userId: number, input: CreateTodoInput): Todo {

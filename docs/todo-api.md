@@ -21,7 +21,15 @@ requests receive `401 { "error": "Not authenticated" }`.
   "created_at": "2026-11-13 07:00:00",
   "updated_at": null,
   "subtasks": [],
-  "tags": []
+  "tags": [
+    {
+      "id": 5,
+      "user_id": 3,
+      "name": "Work",
+      "color": "#3B82F6",
+      "created_at": "2026-11-13 07:00:00"
+    }
+  ]
 }
 ```
 
@@ -29,7 +37,10 @@ requests receive `401 { "error": "Not authenticated" }`.
 as Singapore local time (`Asia/Singapore`); responses use UTC ISO timestamps.
 `priority` is `high`, `medium`, or `low`. Creation also accepts optional
 `is_recurring`, `recurrence_pattern`, `reminder_minutes`, and `tag_ids` fields.
-Updates accept any of those fields plus `completed` and `last_notification_sent`.
+`tags` contains the live tag records attached to the todo. Todo creation accepts
+`tag_ids`; todo updates replace all tag associations when `tag_ids` is supplied
+and preserve them when it is omitted. Updates also accept `completed` and
+`last_notification_sent`.
 Reminder minutes must be one of `15`, `30`, `60`, `120`, `1440`, `2880`, or
 `10080`, and require a due date. Changing the due date or reminder resets the
 notification timestamp. Mark a displayed notification separately using an
@@ -49,7 +60,23 @@ Subtask creation and tag management have separate feature contracts.
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
 | `PUT` | `/api/todos/:id` | `200 Todo` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
+| `GET` | `/api/tags` | `200 Tag[]` | Current user's tags |
+| `POST` | `/api/tags` | `201 Tag` | `{ name, color? }` |
+| `PUT` | `/api/tags/:id` | `200 Tag` | `{ name?, color? }` |
+| `DELETE` | `/api/tags/:id` | `200 { "success": true }` | Deletes tag links by cascade |
+| `POST` | `/api/todos/:id/tags` | `200 Todo` | `{ tag_id }`; idempotent attach |
+| `DELETE` | `/api/todos/:id/tags` | `200 Todo` | `{ tag_id }`; idempotent detach |
 | `GET` | `/api/notifications/check` | `200 { "success": true, "data": Todo[] }` | — |
+
+Tag names are trimmed and must not be empty. Names are unique per user; a
+duplicate returns `409`. Colors default to `#3B82F6` on creation and otherwise
+must be six-digit `#RRGGBB` hex values. Tag routes require authentication,
+scope tags and todo links to the current user, return `404` for inaccessible
+records, and return `400` for invalid fields. Tag deletion cascades to its
+`todo_tags` rows. Tag names/colors are loaded live into `Todo.tags`, so edits
+are reflected without rewriting todo records. Tag pills choose black or white
+text based on the selected background color to keep the foreground contrast at
+WCAG AA; a fixed white label cannot meet that threshold on every valid color.
 
 Creation trims and requires a non-empty title. A missing or `null` priority on
 creation defaults to `medium`; otherwise it must be `high`, `medium`, or `low`.

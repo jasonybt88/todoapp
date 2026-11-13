@@ -108,3 +108,85 @@ describe("reminder persistence", () => {
       .toBeNull();
   });
 });
+
+describe("tag persistence", () => {
+  it("scopes tag names by user and returns current tag data on todos", () => {
+    const owner = createUser("tag-owner");
+    const other = createUser("tag-other");
+    const work = database.tagDB.create(owner.id, { name: "Work" });
+    const otherWork = database.tagDB.create(other.id, { name: "Work" });
+    const personal = database.tagDB.create(owner.id, {
+      name: "Personal",
+      color: "#123456",
+    });
+
+    expect(work.color).toBe("#3B82F6");
+    expect(otherWork.id).not.toBe(work.id);
+    expect(database.tagDB.findAllByUser(owner.id)).toHaveLength(2);
+    expect(database.tagDB.findById(work.id, other.id)).toBeNull();
+    expect(() => database.tagDB.create(owner.id, { name: "Work" })).toThrow();
+
+    const todo = database.todoDB.create(owner.id, {
+      title: "Tagged todo",
+      tag_ids: [work.id, personal.id],
+    });
+    expect(todo.tags.map((tag) => tag.name)).toEqual(["Personal", "Work"]);
+
+    const updated = database.tagDB.update(work.id, owner.id, {
+      name: "Projects",
+      color: "#112233",
+    });
+    expect(updated).toMatchObject({ name: "Projects", color: "#112233" });
+    expect(database.todoDB.findById(todo.id)?.tags).toContainEqual(updated);
+    expect(database.tagDB.update(work.id, other.id, { name: "Hidden" })).toBeNull();
+  });
+
+  it("attaches and detaches idempotently and rejects cross-user relationships", () => {
+    const owner = createUser("tag-attach-owner");
+    const other = createUser("tag-attach-other");
+    const todo = database.todoDB.create(owner.id, { title: "Todo" });
+    const tag = database.tagDB.create(owner.id, { name: "Repeat" });
+    const otherTag = database.tagDB.create(other.id, { name: "Private" });
+
+    expect(database.tagDB.attachToTodo(todo.id, tag.id, owner.id)).toBe(true);
+    expect(database.tagDB.attachToTodo(todo.id, tag.id, owner.id)).toBe(true);
+    expect(database.tagDB.findByTodoId(todo.id)).toHaveLength(1);
+    expect(database.tagDB.detachFromTodo(todo.id, tag.id, owner.id)).toBe(true);
+    expect(database.tagDB.detachFromTodo(todo.id, tag.id, owner.id)).toBe(true);
+    expect(database.tagDB.findByTodoId(todo.id)).toEqual([]);
+    expect(database.tagDB.attachToTodo(todo.id, otherTag.id, owner.id)).toBe(false);
+    expect(database.tagDB.detachFromTodo(todo.id, otherTag.id, owner.id)).toBe(false);
+  });
+
+  it("replaces todo tags atomically and cascades only the deleted tag links", () => {
+    const owner = createUser("tag-cascade-owner");
+    const other = createUser("tag-cascade-other");
+    const kept = database.tagDB.create(owner.id, { name: "Keep" });
+    const removed = database.tagDB.create(owner.id, { name: "Remove" });
+    const foreign = database.tagDB.create(other.id, { name: "Foreign" });
+    const todo = database.todoDB.create(owner.id, {
+      title: "Parent",
+      tag_ids: [kept.id, removed.id],
+    });
+    const additionalTodos = Array.from({ length: 50 }, (_, index) =>
+      database.todoDB.create(owner.id, {
+        title: `Cascade ${index}`,
+        tag_ids: [removed.id],
+      }),
+    );
+
+    expect(() =>
+      database.todoDB.update(todo.id, { tag_ids: [foreign.id] }),
+    ).toThrow("Tag not found");
+    expect(database.todoDB.findById(todo.id)?.tags.map((tag) => tag.id))
+      .toEqual([kept.id, removed.id]);
+
+    expect(database.tagDB.delete(removed.id, other.id)).toBe(false);
+    expect(database.tagDB.delete(removed.id, owner.id)).toBe(true);
+    expect(database.todoDB.findById(todo.id)?.tags.map((tag) => tag.id))
+      .toEqual([kept.id]);
+    expect(additionalTodos.every((item) =>
+      database.todoDB.findById(item.id)?.tags.length === 0,
+    )).toBe(true);
+  });
+});
