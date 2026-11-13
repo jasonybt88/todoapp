@@ -9,8 +9,61 @@ function requiredValue(argumentsList, index, option) {
   return value;
 }
 
+function requiredId(value, name) {
+  if (!/^[1-9]\d*$/.test(value ?? "")) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return value;
+}
+
+function parseTagOptions(options, allowedOptions) {
+  const input = {};
+  for (let index = 0; index < options.length; index += 1) {
+    const option = options[index];
+    if (!allowedOptions.includes(option)) {
+      throw new Error(`Unknown option: ${option}`);
+    }
+    input[option.slice(2) === "name" ? "name" : "color"] =
+      requiredValue(options, index, option);
+    index += 1;
+  }
+  return input;
+}
+
 export function parseCommand(argumentsList) {
   const [command, ...args] = argumentsList;
+
+  if (command === "tags" && args[0] === "list" && args.length === 1) {
+    return { command, action: "list" };
+  }
+  if (command === "tags" && args[0] === "create" && args.length >= 2) {
+    const input = { name: args[1] };
+    Object.assign(input, parseTagOptions(args.slice(2), ["--color"]));
+    return { command, action: "create", input };
+  }
+  if (command === "tags" && args[0] === "update" && args.length >= 2) {
+    const id = requiredId(args[1], "Tag ID");
+    const input = parseTagOptions(args.slice(2), ["--name", "--color"]);
+    if (Object.keys(input).length === 0) {
+      throw new Error("Provide --name or --color to update a tag.");
+    }
+    return { command, action: "update", id, input };
+  }
+  if (command === "tags" && args[0] === "delete" && args.length === 2) {
+    return { command, action: "delete", id: requiredId(args[1], "Tag ID") };
+  }
+  if (
+    command === "tags" &&
+    (args[0] === "attach" || args[0] === "detach") &&
+    args.length === 3
+  ) {
+    return {
+      command,
+      action: args[0],
+      todoId: requiredId(args[1], "Todo ID"),
+      tagId: requiredId(args[2], "Tag ID"),
+    };
+  }
 
   if (command === "list" && args.length === 0) {
     return { command };
@@ -73,7 +126,7 @@ export function parseCommand(argumentsList) {
   }
 
   throw new Error(
-    "Usage: node cli/todo.mjs list | get <id> | create <title> [--priority high|medium|low] [--due-date ISO] | update <id> [--title text] [--priority value] [--due-date ISO|none] [--completed true|false] | delete <id>",
+    "Usage: node cli/todo.mjs list | get <id> | create <title> [--priority high|medium|low] [--due-date ISO] | update <id> [--title text] [--priority value] [--due-date ISO|none] [--completed true|false] | delete <id> | tags list | tags create <name> [--color #RRGGBB] | tags update <id> [--name text] [--color #RRGGBB] | tags delete <id> | tags attach <todoId> <tagId> | tags detach <todoId> <tagId>",
   );
 }
 
@@ -89,6 +142,23 @@ export async function executeCommand(parsed, client) {
       return client.update(parsed.id, parsed.input);
     case "delete":
       return client.delete(parsed.id);
+    case "tags":
+      switch (parsed.action) {
+        case "list":
+          return client.listTags();
+        case "create":
+          return client.createTag(parsed.input);
+        case "update":
+          return client.updateTag(parsed.id, parsed.input);
+        case "delete":
+          return client.deleteTag(parsed.id);
+        case "attach":
+          return client.attachTag(parsed.todoId, parsed.tagId);
+        case "detach":
+          return client.detachTag(parsed.todoId, parsed.tagId);
+        default:
+          throw new Error("Unknown tag command.");
+      }
     default:
       throw new Error("Unknown command.");
   }

@@ -52,7 +52,17 @@ npm run todo -- get 12
 npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
 npm run todo -- delete 12
+npm run todo -- tags list
+npm run todo -- tags create "Work" --color "#3B82F6"
+npm run todo -- tags update 5 --name "Projects" --color "#123456"
+npm run todo -- tags attach 12 5
+npm run todo -- tags detach 12 5
+npm run todo -- tags delete 5
 ```
+
+Tags are user-scoped, can be assigned in multiples to a todo, and can be
+managed from **Manage Tags** in the web dashboard. Deleting a tag removes its
+todo associations; the CLI and web UI use the same tag API.
 
 ## Checks and release
 
