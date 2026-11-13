@@ -36,17 +36,23 @@ Subtask creation and tag management have separate feature contracts.
 
 | Method | Path | Success | Request |
 |---|---|---|---|
-| `GET` | `/api/todos` | `200 Todo[]` | — |
+| `GET` | `/api/todos` | `200 Todo[]` | Optional `?priority=high|medium|low` |
 | `POST` | `/api/todos` | `201 Todo` | `{ title, due_date?, priority?, is_recurring?, recurrence_pattern?, reminder_minutes?, tag_ids? }` |
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
 | `PUT` | `/api/todos/:id` | `200 Todo` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
 
-Creation trims and requires a non-empty title. A creation due date must be valid
-and at least one minute in the future when checked by the server. Updates may
-move a due date into the past so the item is displayed as overdue. Invalid input
-returns `400 { "error": "..." }`. A missing todo or one owned by another user
-returns the same `404 { "error": "Todo not found" }`.
+Creation trims and requires a non-empty title. A missing or `null` priority on
+creation defaults to `medium`; otherwise it must be `high`, `medium`, or `low`.
+Updates preserve priority when the field is omitted and reject `null` or any
+other value. The list endpoint filters by a supplied priority and rejects an
+unknown priority with `400`.
+
+A creation due date must be valid and at least one minute in the future when
+checked by the server. Updates may move a due date into the past so the item is
+displayed as overdue. Invalid input returns `400 { "error": "..." }`. A missing
+todo or one owned by another user returns the same
+`404 { "error": "Todo not found" }`.
 
 SQLite stores booleans as integers and enables foreign keys at connection
 initialization. Deleting a todo therefore cascades to its subtasks and tag links.

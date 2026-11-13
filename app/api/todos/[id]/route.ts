@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   todoDB,
-  type Priority,
   type RecurrencePattern,
   type UpdateTodoInput,
 } from "@/lib/db";
 import { errorResponse, readJsonObject } from "@/lib/http";
-import { validateDueDate, validateTodoTitle } from "@/lib/todo";
+import {
+  validateDueDate,
+  validatePriority,
+  validateTodoTitle,
+} from "@/lib/todo";
 
 const allowedFields = new Set([
   "title",
@@ -19,10 +22,6 @@ const allowedFields = new Set([
   "completed",
   "tag_ids",
 ]);
-
-function isPriority(value: unknown): value is Priority {
-  return value === "high" || value === "medium" || value === "low";
-}
 
 function isRecurrencePattern(value: unknown): value is RecurrencePattern {
   return (
@@ -125,11 +124,15 @@ export async function PUT(
     input.due_date = dueDate.value;
   }
 
-  if (body.priority !== undefined) {
-    if (!isPriority(body.priority)) {
-      return errorResponse("Priority must be high, medium, or low", 400);
+  if (Object.hasOwn(body, "priority")) {
+    try {
+      input.priority = validatePriority(body.priority);
+    } catch (error) {
+      if (error instanceof Error) {
+        return errorResponse(error.message, 400);
+      }
+      throw error;
     }
-    input.priority = body.priority;
   }
 
   if (body.is_recurring !== undefined) {

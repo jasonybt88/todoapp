@@ -1,6 +1,13 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import type { Priority } from "@/lib/priority";
+
+export {
+  PRIORITY_ORDER,
+  PRIORITY_VALUES,
+} from "@/lib/priority";
+export type { Priority } from "@/lib/priority";
 
 export interface User {
   id: number;
@@ -18,7 +25,6 @@ export interface Authenticator {
   created_at: string;
 }
 
-export type Priority = "high" | "medium" | "low";
 export type RecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
 
 export interface Subtask {

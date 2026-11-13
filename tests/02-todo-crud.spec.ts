@@ -144,6 +144,58 @@ test("validates the shared API contract and rolls back failed creates", async ({
   await expect(page.getByText("Optimistic task", { exact: true })).toHaveCount(0);
 });
 
+test("validates priority writes and filters the API list", async ({ page, context }) => {
+  await register(page, context);
+
+  const high = await page.request.post("/api/todos", {
+    data: { title: "High task", priority: "high" },
+  });
+  const medium = await page.request.post("/api/todos", {
+    data: { title: "Default priority task" },
+  });
+  const low = await page.request.post("/api/todos", {
+    data: { title: "Low task", priority: "low" },
+  });
+  expect(high.status()).toBe(201);
+  expect(medium.status()).toBe(201);
+  expect(low.status()).toBe(201);
+  const highTodo = (await high.json()) as { id: number };
+
+  const invalidCreate = await page.request.post("/api/todos", {
+    data: { title: "Invalid priority task", priority: "urgent" },
+  });
+  expect(invalidCreate.status()).toBe(400);
+  expect(await invalidCreate.json()).toMatchObject({
+    error: "Invalid priority: urgent. Must be 'high', 'medium', or 'low'.",
+  });
+
+  const highList = await page.request.get("/api/todos?priority=high");
+  expect(highList.status()).toBe(200);
+  expect(await highList.json()).toMatchObject([
+    { id: highTodo.id, title: "High task", priority: "high" },
+  ]);
+  const invalidFilter = await page.request.get("/api/todos?priority=urgent");
+  expect(invalidFilter.status()).toBe(400);
+
+  const clearPriority = await page.request.put(`/api/todos/${highTodo.id}`, {
+    data: { priority: null },
+  });
+  expect(clearPriority.status()).toBe(400);
+  const invalidUpdate = await page.request.put(`/api/todos/${highTodo.id}`, {
+    data: { priority: "urgent" },
+  });
+  expect(invalidUpdate.status()).toBe(400);
+  const unchanged = await page.request.get(`/api/todos/${highTodo.id}`);
+  expect(await unchanged.json()).toMatchObject({ priority: "high" });
+
+  const todos = await page.request.get("/api/todos");
+  expect((await todos.json()).map((todo: { title: string }) => todo.title).sort()).toEqual([
+    "Default priority task",
+    "High task",
+    "Low task",
+  ]);
+});
+
 test("rejects unauthenticated requests and hides another user's todos", async ({
   page,
   context,
@@ -168,7 +220,7 @@ test("rejects unauthenticated requests and hides another user's todos", async ({
   });
 
   const secondContext = await browser.newContext({
-    baseURL: "http://localhost:3000",
+    baseURL: new URL(page.url()).origin,
     timezoneId: "Asia/Singapore",
   });
   try {

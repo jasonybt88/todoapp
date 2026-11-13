@@ -3,6 +3,7 @@ import {
   sectionTodos,
   sortTodos,
   validateDueDate,
+  validatePriority,
   validateTodoTitle,
 } from "../../lib/todo";
 import type { Todo } from "../../lib/db";
@@ -56,6 +57,17 @@ describe("todo input validation", () => {
       validateDueDate("2026-01-01T08:01", now, true),
     ).toEqual({ valid: true, value: "2026-01-01T00:01:00.000Z" });
   });
+
+  it("defaults omitted create priorities and rejects invalid or cleared update priorities", () => {
+    expect(validatePriority(undefined, true)).toBe("medium");
+    expect(validatePriority(null, true)).toBe("medium");
+    expect(validatePriority("high")).toBe("high");
+    expect(validatePriority("medium")).toBe("medium");
+    expect(validatePriority("low")).toBe("low");
+    expect(() => validatePriority(null)).toThrow(/Invalid priority: null/);
+    expect(() => validatePriority("urgent")).toThrow(/Invalid priority: urgent/);
+    expect(() => validatePriority("HIGH")).toThrow(/Invalid priority: HIGH/);
+  });
 });
 
 describe("todo sorting and sections", () => {
@@ -72,6 +84,18 @@ describe("todo sorting and sections", () => {
     ];
 
     expect(sortTodos(todos).map(({ id }) => id)).toEqual([4, 3, 2, 1]);
+  });
+
+  it("sorts missing due dates last and does not mutate the input", () => {
+    const todos = [
+      todo(1, { priority: "low" }),
+      todo(2, { priority: "low", due_date: "2026-01-02T00:00:00.000Z" }),
+      todo(3, { priority: "low", due_date: "2026-01-02T00:00:00.000Z" }),
+    ];
+    const original = [...todos];
+
+    expect(sortTodos(todos).map(({ id }) => id)).toEqual([3, 2, 1]);
+    expect(todos).toEqual(original);
   });
 
   it("places due-at-now items in Pending and completed items in Completed", () => {
