@@ -1,4 +1,13 @@
 import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import type { APIRequestContext } from "@playwright/test";
+
+export interface TagFixture {
+  id: number;
+  user_id: number;
+  name: string;
+  color: string;
+  created_at: string;
+}
 
 export async function registerTestUser(page: Page, context: BrowserContext) {
   await page.goto("/login");
@@ -28,4 +37,18 @@ export async function addSubtask(page: Page, card: Locator, title: string, viaEn
   else await card.getByRole("button", { name: "Add", exact: true }).click();
   expect((await response).status()).toBe(201);
   await expect(card.getByRole("checkbox", { name: `Mark subtask "${title}" as complete` })).toBeEnabled();
+}
+
+export async function createTag(
+  request: APIRequestContext,
+  name: string,
+  color?: string,
+): Promise<TagFixture> {
+  const response = await request.post("/api/tags", {
+    data: { name, ...(color === undefined ? {} : { color }) },
+  });
+  if (!response.ok()) {
+    throw new Error(`Tag fixture creation failed: ${response.status()}`);
+  }
+  return (await response.json()) as TagFixture;
 }
