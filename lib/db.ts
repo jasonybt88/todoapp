@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { getCalendarVisibleRange } from "@/lib/calendar";
+import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
 
 export interface User {
   id: number;
@@ -36,6 +38,12 @@ export interface Tag {
   name: string;
   color: string;
   created_at: string;
+}
+
+export interface Holiday {
+  id: number;
+  date: string;
+  name: string;
 }
 
 export interface Todo {
@@ -151,6 +159,14 @@ function createDatabase(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
 
+    CREATE TABLE IF NOT EXISTS holidays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date);
+
     CREATE TABLE IF NOT EXISTS auth_challenges (
       username TEXT NOT NULL,
       purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')),
@@ -159,6 +175,7 @@ function createDatabase(): Database.Database {
       PRIMARY KEY (username, purpose)
     );
   `);
+  seedHolidayRows(db, SINGAPORE_PUBLIC_HOLIDAYS);
 
   return db;
 }
@@ -167,6 +184,45 @@ function getDatabase(): Database.Database {
   database ??= createDatabase();
   return database;
 }
+
+function seedHolidayRows(
+  db: Database.Database,
+  holidays: readonly HolidaySeed[],
+): void {
+  const insert = db.prepare(
+    `INSERT INTO holidays (date, name) VALUES (?, ?)
+     ON CONFLICT(date) DO UPDATE SET name = excluded.name`,
+  );
+  const seed = db.transaction(() => {
+    for (const holiday of holidays) {
+      insert.run(holiday.date, holiday.name);
+    }
+  });
+  seed();
+}
+
+export function seedSingaporeHolidays(): void {
+  seedHolidayRows(getDatabase(), SINGAPORE_PUBLIC_HOLIDAYS);
+}
+
+export const holidayDB = {
+  findAll(): Holiday[] {
+    return getDatabase()
+      .prepare("SELECT id, date, name FROM holidays ORDER BY date, name")
+      .all() as Holiday[];
+  },
+
+  findByMonth(year: number, month: number): Holiday[] {
+    const { start, end } = getCalendarVisibleRange(year, month);
+    return getDatabase()
+      .prepare(
+        `SELECT id, date, name FROM holidays
+         WHERE date BETWEEN ? AND ?
+         ORDER BY date, name`,
+      )
+      .all(start, end) as Holiday[];
+  },
+};
 
 export function findUserByUsername(username: string): User | null {
   const user = getDatabase()

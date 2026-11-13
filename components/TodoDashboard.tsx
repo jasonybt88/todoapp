@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { CreateTodoInput, Priority, Todo, UpdateTodoInput } from "@/lib/db";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
@@ -283,7 +284,12 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           <p className="eyebrow">Your tasks</p>
           <h2 id="todos-title">Todos</h2>
         </div>
-        <span className="muted">{todos.length} total</span>
+        <div className="todo-heading-actions">
+          <Link className="calendar-list-link" href="/calendar">
+            Calendar
+          </Link>
+          <span className="muted">{todos.length} total</span>
+        </div>
       </div>
 
       <form className="todo-form" onSubmit={addTodo}>

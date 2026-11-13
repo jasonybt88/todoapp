@@ -41,6 +41,12 @@ Subtask creation and tag management have separate feature contracts.
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
 | `PUT` | `/api/todos/:id` | `200 Todo` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
+| `GET` | `/api/holidays` | `200 { "holidays": Holiday[] }` | — |
+| `GET` | `/api/holidays?year=2026&month=12` | `200 { "holidays": Holiday[] }` | Optional `YYYY` and `MM` pair; results include visible adjacent calendar dates |
+
+Holiday records are global and read-only through the API. The calendar database
+seeds Singapore public holidays for 2025–2027 when initialized; the seed command
+can be rerun safely.
 
 Creation trims and requires a non-empty title. A creation due date must be valid
 and at least one minute in the future when checked by the server. Updates may

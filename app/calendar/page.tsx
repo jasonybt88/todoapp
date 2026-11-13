@@ -1,11 +1,10 @@
+import { Suspense } from "react";
+import { CalendarPageContent } from "@/components/CalendarPageContent";
+
 export default function CalendarPage() {
   return (
-    <main className="page-shell">
-      <section className="home-card">
-        <p className="eyebrow">Todo App</p>
-        <h1>Calendar</h1>
-        <p className="muted">Your calendar is ready for authenticated access.</p>
-      </section>
-    </main>
+    <Suspense fallback={<main className="calendar-shell"><p role="status">Loading calendar...</p></main>}>
+      <CalendarPageContent />
+    </Suspense>
   );
 }

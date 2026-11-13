@@ -23,9 +23,19 @@ npm run dev
 Open `http://localhost:3000/login` and register or log in with a passkey. There
 is no password fallback.
 
+## Calendar
+
+The authenticated `/calendar` page shows due-dated todos by Singapore-local
+date, with priority colors, a day-detail dialog, and public holidays for 2025
+through 2027. The holiday list is seeded automatically when the SQLite database is
+initialized; it can also be refreshed with `npm run seed:holidays`. The dates
+are based on Singapore's [Ministry of Manpower public holiday calendar](https://www.mom.gov.sg/employment-practices/public-holidays)
+and should be reviewed when new years are announced.
+
 ## Todo API
 
-Routes are `GET/POST /api/todos` and `GET/PUT/DELETE /api/todos/:id`. All
+Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
+`GET /api/holidays`. All
 requests use the `auth_session` HTTP-only cookie; todo reads and writes are
 scoped to the current session. Due dates are validated server-side and displayed
 in Singapore time. See [docs/todo-api.md](docs/todo-api.md) for request fields,

@@ -60,4 +60,17 @@ describe("todo persistence", () => {
     expect(database.subtaskDB.findByTodoId(todo.id)).toEqual([]);
     expect(database.subtaskDB.findByTodoId(subtask.todo_id)).toEqual([]);
   });
+
+  it("seeds holidays and includes adjacent-month holidays in the visible range", () => {
+    const december = database.holidayDB.findByMonth(2026, 12);
+    expect(december).toContainEqual(
+      expect.objectContaining({ date: "2026-12-25", name: "Christmas Day" }),
+    );
+    expect(december).toContainEqual(
+      expect.objectContaining({ date: "2027-01-01", name: "New Year's Day" }),
+    );
+    expect(database.holidayDB.findByMonth(2027, 2)).toContainEqual(
+      expect.objectContaining({ date: "2027-02-08", name: "Chinese New Year (observed)" }),
+    );
+  });
 });
