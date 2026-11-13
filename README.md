@@ -43,6 +43,14 @@ Expand **Subtasks** on any todo to add and check off individual steps. The
 progress bar remains visible when collapsed. Parent and subtask completion are
 independent. The search field matches both todo and subtask titles.
 
+## Backups
+
+Use **Export JSON** for a versioned backup that can be imported later, or
+**Export CSV** for spreadsheet analysis. JSON backups include todos, subtasks,
+and tag associations; imports assign new IDs, reuse tags by case-insensitive
+name, and create new todos rather than merging with existing ones. CSV files are
+one-way exports and cannot be imported.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and

@@ -56,6 +56,18 @@ feature contract.
 | `POST` | `/api/todos/:id/subtasks` | `201 Subtask` | `{ title }` |
 | `PUT` | `/api/subtasks/:id` | `200 Subtask` | `{ title?, completed? }` |
 | `DELETE` | `/api/subtasks/:id` | `200 { "success": true }` | — |
+| `GET` | `/api/todos/export?format=json` | `200 TodoExport` download | Optional `format=json` (default) or `format=csv` |
+| `GET` | `/api/todos/export?format=csv` | `200 text/csv` download | RFC 4180 CSV; spreadsheet formulas in titles are neutralized |
+| `POST` | `/api/todos/import` | `200 { "success": true, "imported": number, "tagsCreated": number, "tagsReused": number }` | Version 1 JSON export envelope |
+
+JSON export has `version: 1`, `exported_at`, and a `todos` array containing
+todo fields plus nested subtasks (`title`, `completed`, `position`) and tags
+(`name`, `color`). Import validates the complete envelope before writing and
+adds all records in one transaction. Imported todos and subtasks receive new
+IDs; existing tag names are matched case-insensitively and keep their original
+color. Re-importing the same file creates duplicate todos by design. CSV uses
+the columns `ID,Title,Completed,Due Date,Priority,Recurring,Pattern,Reminder`
+and is not accepted by the import route.
 
 Holiday records are global and read-only through the API. The calendar database
 seeds Singapore public holidays for 2025–2027 when initialized; the seed command

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateTodoInput, Priority, Subtask, Todo, UpdateTodoInput } from "@/lib/db";
 import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
+import { ExportImportToolbar } from "@/components/ExportImportToolbar";
 import { requestJson } from "@/lib/client-http";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
@@ -165,6 +166,11 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [editing, setEditing] = useState<Todo | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const notifications = useNotifications();
+
+  async function reloadTodos() {
+    const result = await requestJson<Todo[]>("/api/todos");
+    if (dashboardActive.current) setTodos(result);
+  }
 
   useEffect(() => {
     dashboardActive.current = true;
@@ -405,6 +411,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
               notifications.permission === "denied" ? "Notifications blocked in browser" :
                 notifications.permission === "unsupported" ? "Notifications unavailable" : "🔔 Enable Notifications"}
           </button>
+          <ExportImportToolbar
+            onImported={async () => {
+              try {
+                await reloadTodos();
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "Todos could not be refreshed.");
+                throw cause;
+              }
+            }}
+          />
         </div>
       </div>
 
