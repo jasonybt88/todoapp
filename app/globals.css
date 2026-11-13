@@ -466,6 +466,7 @@ button:disabled {
 
 .todo-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
   margin: 0 0 1.25rem;
@@ -498,7 +499,7 @@ button:disabled {
   font-size: 1rem;
 }
 
-.todo-section:first-child h3 {
+#section-overdue {
   color: #a5342e;
 }
 
@@ -532,6 +533,82 @@ button:disabled {
 .todo-search {
   width: 100%;
   margin-bottom: 1rem;
+  padding-right: 3rem;
+}
+
+.filter-search {
+  position: relative;
+}
+
+.filter-search button {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  border: 0;
+  background: transparent;
+  padding: 0.4rem 0.6rem;
+  color: #34415b;
+}
+
+.filter-advanced,
+.filter-clear,
+.filter-save,
+.filter-preset button {
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  padding: 0.5rem;
+  font-weight: 600;
+}
+
+.filter-advanced {
+  background: #e8ebf2;
+  color: #263248;
+}
+
+.filter-advanced.active {
+  background: #3446c4;
+  color: white;
+}
+
+.filter-clear { color: #a5342e; }
+.filter-save { color: #17643b; }
+
+.advanced-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  border: 1px solid #e0e5ef;
+  border-radius: 0.55rem;
+  padding: 0.8rem;
+}
+
+.advanced-filters select,
+.advanced-filters input {
+  min-height: 2.5rem;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  background: white;
+  padding: 0.5rem;
+  color: #172033;
+}
+
+.filter-presets {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.filter-preset {
+  border: 1px solid #cbd3e1;
+  border-radius: 2rem;
+}
+
+.filter-preset button {
+  color: #263248;
 }
 
 .subtasks {

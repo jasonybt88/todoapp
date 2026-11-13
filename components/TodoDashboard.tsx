@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateTodoInput, Priority, Subtask, Todo, UpdateTodoInput } from "@/lib/db";
 import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
+import { TodoFilters } from "@/components/TodoFilters";
 import { requestJson } from "@/lib/client-http";
+import { applyFilters, DEFAULT_FILTER_STATE, type FilterState } from "@/lib/filters";
+import { useDebounce } from "@/lib/hooks/useDebounce";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
@@ -144,9 +147,9 @@ function TodoRow({
 export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState("");
-  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTER_STATE });
+  const [debouncedSearch, setDebouncedSearch] = useDebounce(filters.search);
   const [priority, setPriority] = useState<Priority>("medium");
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const [dueDate, setDueDate] = useState("");
   const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const createDraftRevision = useRef(0);
@@ -211,14 +214,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [editing]);
 
-  const sections = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    const visible = todos.filter((todo) =>
-      (priorityFilter === "all" || todo.priority === priorityFilter) &&
-      (!query || todo.title.toLocaleLowerCase().includes(query) ||
-        todo.subtasks.some((subtask) => subtask.title.toLocaleLowerCase().includes(query))));
-    return sectionTodos(visible, now);
-  }, [todos, now, search, priorityFilter]);
+  const tags = useMemo(() => {
+    const found = new Map<number, Todo["tags"][number]>();
+    for (const todo of todos) for (const tag of todo.tags ?? []) found.set(tag.id, tag);
+    return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [todos]);
+  const { priority: filterPriority, tagId, completion, dueDateFrom, dueDateTo } = filters;
+  const sections = useMemo(() => sectionTodos(applyFilters(todos, {
+    search: debouncedSearch, priority: filterPriority, tagId, completion, dueDateFrom, dueDateTo,
+  }), now), [todos, now, debouncedSearch, filterPriority, tagId, completion, dueDateFrom, dueDateTo]);
+  const matchingCount = sections.overdue.length + sections.pending.length + sections.completed.length;
 
   function updateSubtasks(id: number, update: (subtasks: Subtask[]) => Subtask[]) {
     setTodos((current) => current.map((todo) =>
@@ -464,24 +469,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         </button>
       </form>
 
-      <div className="todo-filters">
-        <label htmlFor="priority-filter">Filter by priority</label>
-        <select
-          id="priority-filter"
-          value={priorityFilter}
-          onChange={(event) =>
-            setPriorityFilter(event.target.value as Priority | "all")
-          }
-        >
-          <option value="all">All Priorities</option>
-          <option value="high">High Priority</option>
-          <option value="medium">Medium Priority</option>
-          <option value="low">Low Priority</option>
-        </select>
-      </div>
-      <input className="todo-search" type="search" value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search todos and subtasks" aria-label="Search todos and subtasks" />
+      <TodoFilters filters={filters} tags={tags} onChange={setFilters} onImmediateSearch={setDebouncedSearch} />
 
       {error && (
         <p className="message error-message" role="alert">
@@ -493,6 +481,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       )}
       {loading ? (
         <p className="muted" role="status">Loading todos...</p>
+      ) : todos.length === 0 ? (
+        <p className="muted">You have no todos yet.</p>
+      ) : matchingCount === 0 ? (
+        <p className="muted">No todos match your filters.</p>
       ) : (
         <div className="todo-sections">
           <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
@@ -608,13 +600,11 @@ function TodoSection({
   nextTemporaryId: () => number;
 }) {
   const headingId = `section-${title.toLowerCase()}`;
+  if (todos.length === 0) return null;
   return (
     <section className="todo-section" aria-labelledby={headingId}>
       <h3 id={headingId}>{title} ({todos.length})</h3>
-      {todos.length === 0 ? (
-        <p className="empty-section">No {title.toLowerCase()} todos.</p>
-      ) : (
-        <ul className="todo-list">
+      <ul className="todo-list">
           {todos.map((todo) => (
             <TodoRow
               key={todo.id}
@@ -629,8 +619,7 @@ function TodoSection({
               nextTemporaryId={nextTemporaryId}
             />
           ))}
-        </ul>
-      )}
+      </ul>
     </section>
   );
 }

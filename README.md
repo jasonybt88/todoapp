@@ -43,6 +43,12 @@ Expand **Subtasks** on any todo to add and check off individual steps. The
 progress bar remains visible when collapsed. Parent and subtask completion are
 independent. The search field matches both todo and subtask titles.
 
+Search and quick priority and tag filters combine with the Advanced completion
+and Singapore-local due-date filters. Save a named filter in Advanced to reuse
+it in the same browser; saved filters are not synced across devices. The tag
+picker currently lists tags attached to loaded todos; tag management is not yet
+available. If a saved tag is unavailable, applying its preset uses all tags.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
