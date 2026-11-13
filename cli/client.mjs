@@ -12,6 +12,7 @@ export function createTodoClient({
 
   const apiUrl = new URL("/api/todos", baseUrl);
   const tagsUrl = new URL("/api/tags", baseUrl);
+  const templatesUrl = new URL("/api/templates", baseUrl);
 
   function todoUrl(id) {
     return new URL(`${apiUrl.pathname}/${encodeURIComponent(id)}`, apiUrl.origin);
@@ -25,6 +26,14 @@ export function createTodoClient({
     return new URL(
       `${apiUrl.pathname}/${encodeURIComponent(todoId)}/tags`,
       apiUrl.origin,
+    );
+  }
+
+  function templateUrl(id, action) {
+    const suffix = action ? `/${action}` : "";
+    return new URL(
+      `${templatesUrl.pathname}/${encodeURIComponent(id)}${suffix}`,
+      templatesUrl.origin,
     );
   }
 
@@ -90,6 +99,21 @@ export function createTodoClient({
         method: "DELETE",
         body: { tag_id: tagId },
       });
+    },
+    listTemplates() {
+      return request(templatesUrl);
+    },
+    createTemplate(input) {
+      return request(templatesUrl, { method: "POST", body: input });
+    },
+    updateTemplate(id, input) {
+      return request(templateUrl(id), { method: "PUT", body: input });
+    },
+    deleteTemplate(id) {
+      return request(templateUrl(id), { method: "DELETE" });
+    },
+    useTemplate(id) {
+      return request(templateUrl(id, "use"), { method: "POST" });
     },
   };
 }

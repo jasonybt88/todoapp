@@ -90,6 +90,11 @@ npm run todo -- tags update 5 --name "Projects" --color "#123456"
 npm run todo -- tags attach 12 5
 npm run todo -- tags detach 12 5
 npm run todo -- tags delete 5
+npm run todo -- template list
+npm run todo -- template create "Weekly review" --title "Review project" --priority high --due-offset-minutes 10080 --repeat weekly --subtask "Check milestones"
+npm run todo -- template use 3
+npm run todo -- template update 3 --category Work
+npm run todo -- template delete 3
 ```
 
 Tags are user-scoped, can be assigned in multiples to a todo, and can be
@@ -98,6 +103,11 @@ todo associations; the CLI and web UI use the same tag API.
 
 Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
 `yearly`. Completing one creates its next occurrence.
+Template commands use the same authenticated API. Template creation supports
+`--description`, `--category`, `--priority`, `--due-offset-minutes`,
+`--reminder-minutes`, `--repeat`, and repeatable `--subtask` options. Use
+`none` to clear optional description, category, due offset, or reminder values;
+`template update` also accepts `--no-repeat` and `--clear-subtasks`.
 
 ## Checks and release
 

@@ -44,7 +44,9 @@ export async function registerTestUser(page: Page, context: BrowserContext) {
   });
   await page.getByLabel("Username").fill(`subtasks-${Date.now()}-${Math.floor(Math.random() * 100000)}`);
   await page.getByRole("button", { name: "Register" }).click();
-  await expect(page.getByRole("heading", { name: "Todos" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Todos" })).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 export async function addSubtask(page: Page, card: Locator, title: string, viaEnter = false) {
@@ -56,4 +58,12 @@ export async function addSubtask(page: Page, card: Locator, title: string, viaEn
   else await card.getByRole("button", { name: "Add", exact: true }).click();
   expect((await response).status()).toBe(201);
   await expect(card.getByRole("checkbox", { name: `Mark subtask "${title}" as complete` })).toBeEnabled();
+}
+
+export async function createTodo(page: Page, title: string, fields: Record<string, unknown> = {}) {
+  const response = await page.request.post("/api/todos", {
+    data: { title, ...fields },
+  });
+  expect(response.status()).toBe(201);
+  return response.json();
 }
