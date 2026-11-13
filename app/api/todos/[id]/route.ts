@@ -218,10 +218,25 @@ export async function PUT(
     input.tag_ids = body.tag_ids;
   }
 
+  const isRecurring = input.is_recurring ?? existing.is_recurring;
+  const recurrencePattern = input.recurrence_pattern !== undefined
+    ? input.recurrence_pattern
+    : existing.recurrence_pattern;
+  const dueDate = input.due_date !== undefined ? input.due_date : existing.due_date;
+  if (isRecurring && dueDate === null) {
+    return errorResponse("Recurring todos require a due date", 400);
+  }
+  if (isRecurring && !isRecurrencePattern(recurrencePattern)) {
+    return errorResponse("Invalid recurrence pattern", 400);
+  }
+  if (!isRecurring) {
+    input.recurrence_pattern = null;
+  }
+
   try {
-    const updated = todoDB.update(id, input);
-    return updated
-      ? NextResponse.json(updated)
+    const result = todoDB.updateAndCreateNextInstance(id, session.userId, input);
+    return result
+      ? NextResponse.json(result)
       : errorResponse("Todo not found", 404);
   } catch (error) {
     if (error instanceof Error && error.message === "Tag not found") {

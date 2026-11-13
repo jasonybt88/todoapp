@@ -48,11 +48,16 @@ never commit or share it.
 ```powershell
 npm run todo -- list
 npm run todo -- create "Prepare report" --priority high
+npm run todo -- create "Pay rent" --due-date 2026-12-01T01:00:00.000Z --repeat monthly
 npm run todo -- get 12
 npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
+npm run todo -- update 12 --no-repeat
 npm run todo -- delete 12
 ```
+
+Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
+`yearly`. Completing one creates its next occurrence.
 
 ## Checks and release
 

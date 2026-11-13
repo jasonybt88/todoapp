@@ -43,8 +43,26 @@ test("CLI client reports API errors and requires an explicit session token", asy
 
 test("CLI commands parse create, update and delete arguments", async () => {
   assert.deepEqual(
-    parseCommand(["create", "Test task", "--priority", "high"]),
-    { command: "create", input: { title: "Test task", priority: "high" } },
+    parseCommand([
+      "create",
+      "Test task",
+      "--priority",
+      "high",
+      "--due-date",
+      "2026-11-14T02:00:00.000Z",
+      "--repeat",
+      "weekly",
+    ]),
+    {
+      command: "create",
+      input: {
+        title: "Test task",
+        priority: "high",
+        due_date: "2026-11-14T02:00:00.000Z",
+        is_recurring: true,
+        recurrence_pattern: "weekly",
+      },
+    },
   );
   assert.deepEqual(
     parseCommand(["update", "12", "--completed", "true", "--due-date", "none"]),
@@ -102,5 +120,24 @@ test("CLI forwards priority updates and reports API validation errors", async ()
       rejectingClient,
     ),
     /Invalid priority: urgent/,
+  );
+});
+
+test("CLI recurrence options validate patterns and disable recurrence explicitly", () => {
+  assert.throws(
+    () => parseCommand(["create", "No date", "--repeat", "daily"]),
+    /require --due-date/,
+  );
+  assert.throws(
+    () => parseCommand(["create", "Bad pattern", "--repeat", "fortnightly"]),
+    /must be daily, weekly, monthly, or yearly/,
+  );
+  assert.deepEqual(
+    parseCommand(["update", "12", "--no-repeat"]),
+    {
+      command: "update",
+      id: "12",
+      input: { is_recurring: false, recurrence_pattern: null },
+    },
   );
 });

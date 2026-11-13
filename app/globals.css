@@ -174,6 +174,34 @@ button:disabled {
   margin: 1rem 0 1.25rem;
 }
 
+.recurrence-fields {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #657187;
+  font-size: 0.85rem;
+}
+
+.recurrence-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #34415b;
+}
+
+.recurrence-fields input[type="checkbox"] {
+  min-height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.recurrence-fields select {
+  min-height: 2rem;
+}
+
 .todo-form input,
 .todo-form select,
 .todo-filters select,
@@ -347,6 +375,17 @@ button:disabled {
   color: var(--priority-low-fg);
 }
 
+.recurrence-badge {
+  border: 1px solid #d8c8f2;
+  border-radius: 999px;
+  background: #f3edfb;
+  padding: 0.2rem 0.55rem;
+  color: #68429b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -492,5 +531,11 @@ button:disabled {
     border-color: #475569;
     background: #1e293b;
     color: #e2e8f0;
+  }
+
+  .recurrence-badge {
+    border-color: #684c8d;
+    background: rgb(104 66 155 / 25%);
+    color: #dfcdf8;
   }
 }
