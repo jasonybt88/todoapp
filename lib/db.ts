@@ -3,6 +3,13 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getCalendarVisibleRange } from "@/lib/calendar";
 import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
+import type { Priority } from "@/lib/priority";
+
+export {
+  PRIORITY_ORDER,
+  PRIORITY_VALUES,
+} from "@/lib/priority";
+export type { Priority } from "@/lib/priority";
 
 export interface User {
   id: number;
@@ -20,7 +27,6 @@ export interface Authenticator {
   created_at: string;
 }
 
-export type Priority = "high" | "medium" | "low";
 export type RecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
 
 export interface Subtask {
@@ -75,6 +81,7 @@ export interface CreateTodoInput {
 
 export interface UpdateTodoInput extends Partial<CreateTodoInput> {
   completed?: boolean;
+  last_notification_sent?: string;
 }
 
 export interface CreateSubtaskInput {
@@ -454,6 +461,40 @@ export const todoDB = {
     return findTodoWithRelations(id);
   },
 
+  findDueReminders(userId: number, now: Date): Todo[] {
+    const rows = getDatabase()
+      .prepare(
+        `SELECT id FROM todos
+         WHERE user_id = ? AND completed = 0 AND due_date IS NOT NULL
+           AND reminder_minutes IS NOT NULL AND last_notification_sent IS NULL
+           AND unixepoch(due_date, 'subsec') * 1000 <= ? + reminder_minutes * 60000
+         ORDER BY due_date, id`,
+      )
+      .all(userId, now.getTime()) as Array<{ id: number }>;
+
+    return rows
+      .map(({ id }) => findTodoWithRelations(id))
+      .filter((todo): todo is Todo => todo !== null);
+  },
+
+  markReminderSent(
+    id: number,
+    userId: number,
+    dueDate: string,
+    reminderMinutes: number,
+    sentAt: string,
+  ): Todo | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const result = db.prepare(
+        `UPDATE todos SET last_notification_sent = ?, updated_at = datetime('now')
+         WHERE id = ? AND user_id = ? AND due_date = ? AND reminder_minutes = ?
+           AND completed = 0 AND last_notification_sent IS NULL`,
+      ).run(sentAt, id, userId, dueDate, reminderMinutes);
+      return result.changes ? findTodoWithRelations(id) : null;
+    })();
+  },
+
   update(id: number, input: UpdateTodoInput): Todo | null {
     const db = getDatabase();
     const update = db.transaction(() => {
@@ -472,6 +513,19 @@ export const todoDB = {
       }
       if (input.completed !== undefined) {
         fields.push({ column: "completed", value: input.completed ? 1 : 0 });
+      }
+      if (input.last_notification_sent !== undefined) {
+        fields.push({ column: "last_notification_sent", value: input.last_notification_sent });
+      } else if (input.due_date !== undefined || input.reminder_minutes !== undefined) {
+        const existing = findTodoWithRelations(id);
+        if (
+          existing &&
+          ((input.due_date !== undefined && input.due_date !== existing.due_date) ||
+            (input.reminder_minutes !== undefined &&
+              input.reminder_minutes !== existing.reminder_minutes))
+        ) {
+          fields.push({ column: "last_notification_sent", value: null });
+        }
       }
 
       if (fields.length > 0) {

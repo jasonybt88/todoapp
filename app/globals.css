@@ -1,10 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   background: #f5f7fb;
   color: #172033;
   font-family: Arial, Helvetica, sans-serif;
+  --priority-high-bg: #fef2f2;
+  --priority-high-fg: #991b1b;
+  --priority-high-border: #ef4444;
+  --priority-medium-bg: #fffbeb;
+  --priority-medium-fg: #92400e;
+  --priority-medium-border: #f59e0b;
+  --priority-low-bg: #eff6ff;
+  --priority-low-fg: #1e40af;
+  --priority-low-border: #3b82f6;
 }
 
 * {
@@ -436,13 +445,14 @@ button:disabled {
 
 .todo-form {
   display: grid;
-  grid-template-columns: minmax(12rem, 1fr) 8rem 13rem auto;
+  grid-template-columns: minmax(10rem, 1fr) 7rem 12rem 11rem auto;
   gap: 0.6rem;
   margin: 1rem 0 1.25rem;
 }
 
 .todo-form input,
 .todo-form select,
+.todo-filters select,
 .edit-form input,
 .edit-form select {
   min-width: 0;
@@ -451,6 +461,24 @@ button:disabled {
   border-radius: 0.55rem;
   background: white;
   padding: 0.65rem 0.75rem;
+  color: #172033;
+}
+
+.todo-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.todo-filters select {
+  min-height: 2.5rem;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  background: white;
+  padding: 0.55rem 0.75rem;
   color: #172033;
 }
 
@@ -540,22 +568,59 @@ button:disabled {
 
 .priority-badge {
   border-radius: 999px;
-  background: #edf0f7;
+  border: 1px solid;
   padding: 0.2rem 0.55rem;
-  color: #34415b;
   font-size: 0.75rem;
   font-weight: 700;
-  text-transform: capitalize;
+}
+
+.reminder-badge {
+  color: #825308;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.notification-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.notifications-enable,
+.notifications-on {
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.8rem;
+  font-weight: 700;
+}
+
+.notifications-enable {
+  background: #d97706;
+  color: white;
+}
+
+.notifications-on {
+  background: #eaf8f0;
+  color: #17643b;
 }
 
 .priority-high {
-  background: #fff0ee;
-  color: #a5342e;
+  background: var(--priority-high-bg);
+  border-color: var(--priority-high-border);
+  color: var(--priority-high-fg);
+}
+
+.priority-medium {
+  background: var(--priority-medium-bg);
+  border-color: var(--priority-medium-border);
+  color: var(--priority-medium-fg);
 }
 
 .priority-low {
-  background: #edf7f0;
-  color: #267046;
+  background: var(--priority-low-bg);
+  border-color: var(--priority-low-border);
+  color: var(--priority-low-fg);
 }
 
 .visually-hidden {
@@ -689,5 +754,69 @@ button:disabled {
 
   .day-todo-status {
     grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #0f172a;
+    color: #e2e8f0;
+    --priority-high-bg: #450a0a;
+    --priority-high-fg: #f87171;
+    --priority-medium-bg: #451a03;
+    --priority-medium-fg: #fbbf24;
+    --priority-low-bg: #172554;
+    --priority-low-fg: #60a5fa;
+  }
+
+  .auth-card,
+  .home-card,
+  .todo-dashboard,
+  .edit-dialog {
+    border-color: #334155;
+    background: #1e293b;
+  }
+
+  .muted,
+  .todo-due-date,
+  .empty-section {
+    color: #94a3b8;
+  }
+
+  .auth-form input,
+  .todo-form input,
+  .todo-form select,
+  .todo-filters select,
+  .edit-form input,
+  .edit-form select {
+    border-color: #475569;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+
+  .todo-section {
+    border-color: #334155;
+  }
+
+  .todo-section h3 {
+    color: #cbd5e1;
+  }
+
+  .todo-section:first-child h3 {
+    color: #f87171;
+  }
+
+  .todo-item {
+    border-color: #334155;
+  }
+
+  .todo-completed .todo-text strong {
+    color: #94a3b8;
+  }
+
+  .secondary-button {
+    border-color: #475569;
+    background: #1e293b;
+    color: #e2e8f0;
   }
 }

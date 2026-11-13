@@ -28,31 +28,53 @@ requests receive `401 { "error": "Not authenticated" }`.
 `due_date` is an ISO 8601 timestamp. A timestamp without an offset is interpreted
 as Singapore local time (`Asia/Singapore`); responses use UTC ISO timestamps.
 `priority` is `high`, `medium`, or `low`. Creation also accepts optional
-`is_recurring`, `recurrence_pattern`, `reminder_minutes`, and `tag_ids` fields for
-the dependent features. Updates accept any of those fields plus `completed`.
+`is_recurring`, `recurrence_pattern`, `reminder_minutes`, and `tag_ids` fields.
+Updates accept any of those fields plus `completed` and `last_notification_sent`.
+Reminder minutes must be one of `15`, `30`, `60`, `120`, `1440`, `2880`, or
+`10080`, and require a due date. Changing the due date or reminder resets the
+notification timestamp. Mark a displayed notification separately using an
+ISO timestamp with a timezone offset.
+For race-safe delivery marking, send only `last_notification_sent` and
+`notification_snapshot: { due_date, reminder_minutes }`, using the values
+returned by the check endpoint. The update returns `409` if the reminder was
+changed, completed, or already marked since the check.
 Subtask creation and tag management have separate feature contracts.
 
 ## Routes
 
 | Method | Path | Success | Request |
 |---|---|---|---|
-| `GET` | `/api/todos` | `200 Todo[]` | — |
+| `GET` | `/api/todos` | `200 Todo[]` | Optional `?priority=high|medium|low` |
 | `POST` | `/api/todos` | `201 Todo` | `{ title, due_date?, priority?, is_recurring?, recurrence_pattern?, reminder_minutes?, tag_ids? }` |
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
 | `PUT` | `/api/todos/:id` | `200 Todo` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
 | `GET` | `/api/holidays` | `200 { "holidays": Holiday[] }` | — |
 | `GET` | `/api/holidays?year=2026&month=12` | `200 { "holidays": Holiday[] }` | Optional `YYYY` and `MM` pair; results include visible adjacent calendar dates |
+| `GET` | `/api/notifications/check` | `200 { "success": true, "data": Todo[] }` | — |
 
 Holiday records are global and read-only through the API. The calendar database
 seeds Singapore public holidays for 2025–2027 when initialized; the seed command
 can be rerun safely.
 
-Creation trims and requires a non-empty title. A creation due date must be valid
-and at least one minute in the future when checked by the server. Updates may
-move a due date into the past so the item is displayed as overdue. Invalid input
-returns `400 { "error": "..." }`. A missing todo or one owned by another user
-returns the same `404 { "error": "Todo not found" }`.
+Creation trims and requires a non-empty title. A missing or `null` priority on
+creation defaults to `medium`; otherwise it must be `high`, `medium`, or `low`.
+Updates preserve priority when the field is omitted and reject `null` or any
+other value. The list endpoint filters by a supplied priority and rejects an
+unknown priority with `400`.
+
+A creation due date must be valid and at least one minute in the future when
+checked by the server. Updates may move a due date into the past so the item is
+displayed as overdue. Invalid input returns `400 { "error": "..." }`. A missing
+todo or one owned by another user returns the same
+`404 { "error": "Todo not found" }`.
 
 SQLite stores booleans as integers and enables foreign keys at connection
 initialization. Deleting a todo therefore cascades to its subtasks and tag links.
+
+The notification check includes incomplete, unsent reminders whose window has
+opened, including overdue reminders. Times are compared as UTC instants; naive
+input is first interpreted as Singapore time. Notifications require browser
+permission and an open app tab, and are polled every 30 seconds. Multiple tabs
+can race before delivery is recorded; notification tags reduce duplicates but
+do not guarantee exactly-once delivery.

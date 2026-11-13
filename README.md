@@ -32,14 +32,23 @@ initialized; it can also be refreshed with `npm run seed:holidays`. The dates
 are based on Singapore's [Ministry of Manpower public holiday calendar](https://www.mom.gov.sg/employment-practices/public-holidays)
 and should be reviewed when new years are announced.
 
+## Reminders
+
+Set a due date to choose a reminder, then use **Enable Notifications** to grant
+browser permission. Reminders are checked every 30 seconds while an app tab is
+open, including overdue reminders. They do not work with the browser closed;
+multiple tabs can occasionally produce duplicate notifications.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
 `GET /api/holidays`. All
 requests use the `auth_session` HTTP-only cookie; todo reads and writes are
 scoped to the current session. Due dates are validated server-side and displayed
-in Singapore time. See [docs/todo-api.md](docs/todo-api.md) for request fields,
-response shapes, and error behavior.
+in Singapore time. Priorities are `high`, `medium`, or `low`; the web list can
+filter by priority, and API consumers can use `GET /api/todos?priority=high`.
+See [docs/todo-api.md](docs/todo-api.md) for request fields, response shapes,
+and error behavior.
 
 ## CLI
 
@@ -52,6 +61,7 @@ never commit or share it.
 npm run todo -- list
 npm run todo -- create "Prepare report" --priority high
 npm run todo -- get 12
+npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
 npm run todo -- delete 12
 ```

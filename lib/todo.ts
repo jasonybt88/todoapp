@@ -1,15 +1,29 @@
 import type { Priority, Todo } from "@/lib/db";
+import { PRIORITY_ORDER, PRIORITY_VALUES } from "@/lib/priority";
 import { parseSingaporeDateTime } from "@/lib/timezone";
 
 export type TodoValidation<T> =
   | { valid: true; value: T }
   | { valid: false; error: string };
 
-const PRIORITY_ORDER: Record<Priority, number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
+function isPriority(value: unknown): value is Priority {
+  return PRIORITY_VALUES.some((priority) => priority === value);
+}
+
+export function validatePriority(
+  value: unknown,
+  defaultToMedium = false,
+): Priority {
+  if (value === undefined || (defaultToMedium && value === null)) {
+    return "medium";
+  }
+  if (isPriority(value)) {
+    return value;
+  }
+  throw new Error(
+    `Invalid priority: ${String(value)}. Must be 'high', 'medium', or 'low'.`,
+  );
+}
 
 export function validateTodoTitle(value: unknown): TodoValidation<string> {
   if (typeof value !== "string" || value.trim().length === 0) {

@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { todoDB, type CreateTodoInput, type Priority, type RecurrencePattern } from "@/lib/db";
+import {
+  todoDB,
+  type CreateTodoInput,
+  type RecurrencePattern,
+} from "@/lib/db";
 import { errorResponse, readJsonObject } from "@/lib/http";
+import { isReminderMinutes } from "@/lib/reminders";
 import { getSingaporeNow } from "@/lib/timezone";
-import { validateDueDate, validateTodoTitle } from "@/lib/todo";
+import {
+  validateDueDate,
+  validatePriority,
+  validateTodoTitle,
+} from "@/lib/todo";
 
 const allowedFields = new Set([
   "title",
@@ -15,23 +24,12 @@ const allowedFields = new Set([
   "tag_ids",
 ]);
 
-function isPriority(value: unknown): value is Priority {
-  return value === "high" || value === "medium" || value === "low";
-}
-
 function isRecurrencePattern(value: unknown): value is RecurrencePattern {
   return (
     value === "daily" ||
     value === "weekly" ||
     value === "monthly" ||
     value === "yearly"
-  );
-}
-
-function isReminderMinutes(value: unknown): value is number | null {
-  return (
-    value === null ||
-    (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
   );
 }
 
@@ -42,13 +40,27 @@ function isTagIdList(value: unknown): value is number[] {
   );
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) {
     return errorResponse("Not authenticated", 401);
   }
 
-  return NextResponse.json(todoDB.findAllByUser(session.userId));
+  const todos = todoDB.findAllByUser(session.userId);
+  const priorityFilter = request.nextUrl.searchParams.get("priority");
+  if (priorityFilter === null) {
+    return NextResponse.json(todos);
+  }
+
+  try {
+    const priority = validatePriority(priorityFilter);
+    return NextResponse.json(todos.filter((todo) => todo.priority === priority));
+  } catch (error) {
+    if (error instanceof Error) {
+      return errorResponse(error.message, 400);
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -75,9 +87,14 @@ export async function POST(request: NextRequest) {
     return errorResponse(dueDate.error, 400);
   }
 
-  const priority = body.priority ?? "medium";
-  if (!isPriority(priority)) {
-    return errorResponse("Priority must be high, medium, or low", 400);
+  let priority;
+  try {
+    priority = validatePriority(body.priority, true);
+  } catch (error) {
+    if (error instanceof Error) {
+      return errorResponse(error.message, 400);
+    }
+    throw error;
   }
 
   const isRecurring = body.is_recurring ?? false;
@@ -91,8 +108,11 @@ export async function POST(request: NextRequest) {
   }
 
   const reminderMinutes = body.reminder_minutes ?? null;
-  if (!isReminderMinutes(reminderMinutes)) {
-    return errorResponse("reminder_minutes must be a non-negative integer or null", 400);
+  if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+    return errorResponse("reminder_minutes must be a supported preset or null", 400);
+  }
+  if (reminderMinutes !== null && dueDate.value === null) {
+    return errorResponse("A due date is required for a reminder", 400);
   }
 
   const tagIds = body.tag_ids ?? [];

@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CreateTodoInput, Priority, Todo, UpdateTodoInput } from "@/lib/db";
+import { useNotifications } from "@/lib/hooks/useNotifications";
+import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
 import { sectionTodos, validateDueDate, validateTodoTitle } from "@/lib/todo";
 
@@ -14,7 +16,53 @@ interface EditDraft {
   title: string;
   dueDate: string;
   priority: Priority;
+  reminderMinutes: number | null;
 }
+
+function ReminderSelect({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: number | null;
+  disabled: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <>
+      <label className="visually-hidden" htmlFor={id}>Reminder</label>
+      <select
+        id={id}
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (value === "") onChange(null);
+          else {
+            const minutes = Number(value);
+            if (isReminderMinutes(minutes)) onChange(minutes);
+          }
+        }}
+      >
+        <option value="">None</option>
+        {value !== null && !isReminderMinutes(value) && (
+          <option value={value}>Previously set: {value} minutes</option>
+        )}
+        {REMINDER_OPTIONS.map((option) => (
+          <option key={option.minutes} value={option.minutes}>{option.label}</option>
+        ))}
+      </select>
+    </>
+  );
+}
+
+const PRIORITY_LABELS: Record<Priority, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -67,8 +115,16 @@ function TodoRow({
         </span>
       </label>
       <div className="todo-meta">
-        <span className={`priority-badge priority-${todo.priority}`}>
-          {todo.priority}
+        {todo.reminder_minutes !== null && isReminderMinutes(todo.reminder_minutes) && (
+          <span className="reminder-badge" aria-label="Reminder">
+            {"🔔"} {REMINDER_OPTIONS.find((option) => option.minutes === todo.reminder_minutes)?.short}
+          </span>
+        )}
+        <span
+          className={`priority-badge priority-${todo.priority}`}
+          aria-label={`${PRIORITY_LABELS[todo.priority]} priority`}
+        >
+          {PRIORITY_LABELS[todo.priority]}
         </span>
         <button type="button" onClick={() => onEdit(todo)} aria-label={`Edit ${todo.title}`}>
           Edit
@@ -90,12 +146,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
+  const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const [dueDate, setDueDate] = useState("");
+  const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
+  const createDraftRevision = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(getSingaporeNow);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const notifications = useNotifications();
 
   useEffect(() => {
     let active = true;
@@ -137,11 +197,21 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [editing]);
 
-  const sections = useMemo(() => sectionTodos(todos, now), [todos, now]);
+  const sections = useMemo(
+    () =>
+      sectionTodos(
+        todos.filter(
+          (todo) => priorityFilter === "all" || todo.priority === priorityFilter,
+        ),
+        now,
+      ),
+    [todos, now, priorityFilter],
+  );
 
   async function addTodo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    const submittedRevision = createDraftRevision.current;
     const validatedTitle = validateTodoTitle(title);
     if (!validatedTitle.valid) {
       setError(validatedTitle.error);
@@ -160,6 +230,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       title: validatedTitle.value,
       priority,
       due_date: validatedDueDate.value,
+      reminder_minutes: reminderMinutes,
     };
     const temporaryId = -Date.now();
     const optimisticTodo: Todo = {
@@ -171,7 +242,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       priority,
       is_recurring: false,
       recurrence_pattern: null,
-      reminder_minutes: null,
+      reminder_minutes: reminderMinutes,
       last_notification_sent: null,
       created_at: getSingaporeNow().toISOString(),
       updated_at: null,
@@ -188,9 +259,12 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       setTodos((current) =>
         current.map((todo) => (todo.id === temporaryId ? saved : todo)),
       );
-      setTitle("");
-      setPriority("medium");
-      setDueDate("");
+      if (createDraftRevision.current === submittedRevision) {
+        setTitle("");
+        setPriority("medium");
+        setDueDate("");
+        setReminderMinutes(null);
+      }
     } catch (cause) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
       setError(cause instanceof Error ? cause.message : "Could not create todo. Please try again.");
@@ -246,6 +320,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       title: todo.title,
       dueDate: todo.due_date ? formatSingaporeDateTimeInput(todo.due_date) : "",
       priority: todo.priority,
+      reminderMinutes: todo.reminder_minutes,
     });
   }
 
@@ -270,6 +345,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       title: validatedTitle.value,
       due_date: validatedDueDate.value,
       priority: editDraft.priority,
+      ...(editDraft.reminderMinutes !== editing.reminder_minutes
+        ? { reminder_minutes: editDraft.reminderMinutes }
+        : {}),
     });
     if (saved) {
       setEditing(null);
@@ -289,6 +367,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
             Calendar
           </Link>
           <span className="muted">{todos.length} total</span>
+          <button
+            className={notifications.permission === "granted" ? "notifications-on" : "notifications-enable"}
+            type="button"
+            disabled={notifications.permission === "granted" || notifications.permission === "unsupported" || notifications.permission === "denied"}
+            onClick={() => void notifications.requestPermission()}
+          >
+            {notifications.permission === "granted" ? "🔔 Notifications On" :
+              notifications.permission === "denied" ? "Notifications blocked in browser" :
+                notifications.permission === "unsupported" ? "Notifications unavailable" : "🔔 Enable Notifications"}
+          </button>
         </div>
       </div>
 
@@ -299,7 +387,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <input
           id="new-todo-title"
           value={title}
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event) => {
+            createDraftRevision.current += 1;
+            setTitle(event.target.value);
+          }}
           placeholder="What needs to be done?"
           aria-label="Todo title"
         />
@@ -309,7 +400,10 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <select
           id="new-todo-priority"
           value={priority}
-          onChange={(event) => setPriority(event.target.value as Priority)}
+          onChange={(event) => {
+            createDraftRevision.current += 1;
+            setPriority(event.target.value as Priority);
+          }}
         >
           <option value="high">High</option>
           <option value="medium">Medium</option>
@@ -322,17 +416,49 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           id="new-todo-due-date"
           type="datetime-local"
           value={dueDate}
-          onChange={(event) => setDueDate(event.target.value)}
+          onChange={(event) => {
+            createDraftRevision.current += 1;
+            setDueDate(event.target.value);
+            if (!event.target.value) setReminderMinutes(null);
+          }}
+        />
+        <ReminderSelect
+          id="new-reminder"
+          value={reminderMinutes}
+          disabled={!dueDate}
+          onChange={(value) => {
+            createDraftRevision.current += 1;
+            setReminderMinutes(value);
+          }}
         />
         <button className="primary-button" type="submit" disabled={loading}>
           Add
         </button>
       </form>
 
+      <div className="todo-filters">
+        <label htmlFor="priority-filter">Filter by priority</label>
+        <select
+          id="priority-filter"
+          value={priorityFilter}
+          onChange={(event) =>
+            setPriorityFilter(event.target.value as Priority | "all")
+          }
+        >
+          <option value="all">All Priorities</option>
+          <option value="high">High Priority</option>
+          <option value="medium">Medium Priority</option>
+          <option value="low">Low Priority</option>
+        </select>
+      </div>
+
       {error && (
         <p className="message error-message" role="alert">
           {error}
         </p>
+      )}
+      {notifications.error && (
+        <p className="message error-message" role="alert">{notifications.error}</p>
       )}
       {loading ? (
         <p className="muted" role="status">Loading todos...</p>
@@ -393,8 +519,18 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                 type="datetime-local"
                 value={editDraft.dueDate}
                 onChange={(event) =>
-                  setEditDraft({ ...editDraft, dueDate: event.target.value })
+                  setEditDraft({
+                    ...editDraft,
+                    dueDate: event.target.value,
+                    reminderMinutes: event.target.value ? editDraft.reminderMinutes : null,
+                  })
                 }
+              />
+              <ReminderSelect
+                id="edit-reminder"
+                value={editDraft.reminderMinutes}
+                disabled={!editDraft.dueDate}
+                onChange={(value) => setEditDraft({ ...editDraft, reminderMinutes: value })}
               />
               <div className="edit-actions">
                 <button className="primary-button" type="submit">Update</button>
