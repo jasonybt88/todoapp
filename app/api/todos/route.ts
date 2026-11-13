@@ -89,6 +89,12 @@ export async function POST(request: NextRequest) {
   if (recurrencePattern !== null && !isRecurrencePattern(recurrencePattern)) {
     return errorResponse("Invalid recurrence_pattern", 400);
   }
+  if (isRecurring && dueDate.value === null) {
+    return errorResponse("Recurring todos require a due date", 400);
+  }
+  if (isRecurring && !isRecurrencePattern(recurrencePattern)) {
+    return errorResponse("Invalid recurrence pattern", 400);
+  }
 
   const reminderMinutes = body.reminder_minutes ?? null;
   if (!isReminderMinutes(reminderMinutes)) {

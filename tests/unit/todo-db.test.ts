@@ -60,4 +60,62 @@ describe("todo persistence", () => {
     expect(database.subtaskDB.findByTodoId(todo.id)).toEqual([]);
     expect(database.subtaskDB.findByTodoId(subtask.todo_id)).toEqual([]);
   });
+
+  it("creates one recurring instance atomically and copies current todo fields", () => {
+    const user = createUser("recurrence-owner");
+    const todo = database.todoDB.create(user.id, {
+      title: "Pay rent",
+      due_date: "2026-01-31T01:00:00.000Z",
+      priority: "high",
+      is_recurring: true,
+      recurrence_pattern: "monthly",
+      reminder_minutes: 30,
+    });
+
+    const completed = database.todoDB.updateAndCreateNextInstance(
+      todo.id,
+      user.id,
+      { completed: true },
+    );
+    expect(completed).toMatchObject({
+      todo: { id: todo.id, completed: true, is_recurring: true },
+      nextInstance: {
+        title: "Pay rent",
+        completed: false,
+        due_date: "2026-02-28T01:00:00.000Z",
+        priority: "high",
+        is_recurring: true,
+        recurrence_pattern: "monthly",
+        reminder_minutes: 30,
+      },
+    });
+
+    const repeatedCompletion = database.todoDB.updateAndCreateNextInstance(
+      todo.id,
+      user.id,
+      { completed: true },
+    );
+    expect(repeatedCompletion).toEqual({ todo: completed?.todo });
+    expect(database.todoDB.findAllByUser(user.id)).toHaveLength(2);
+  });
+
+  it("does not create recurring instances for other users or non-recurring todos", () => {
+    const owner = createUser("nonrecurring-owner");
+    const otherUser = createUser("nonrecurring-other");
+    const todo = database.todoDB.create(owner.id, { title: "One-off" });
+
+    expect(
+      database.todoDB.updateAndCreateNextInstance(todo.id, otherUser.id, {
+        completed: true,
+      }),
+    ).toBeNull();
+    expect(
+      database.todoDB.updateAndCreateNextInstance(todo.id, owner.id, {
+        completed: true,
+      }),
+    ).toEqual({
+      todo: expect.objectContaining({ completed: true }),
+    });
+    expect(database.todoDB.findAllByUser(owner.id)).toHaveLength(1);
+  });
 });
