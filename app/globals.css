@@ -191,10 +191,60 @@ button:disabled {
 .todo-filters {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.6rem;
   margin: 0 0 1.25rem;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.todo-tag-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.tag-field-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tag-selector {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tag-pill {
+  display: inline-flex;
+  max-width: 12rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgb(15 23 42 / 25%);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.tag-pill-selected {
+  box-shadow: 0 0 0 2px currentColor;
+}
+
+.tag-pill:focus-visible {
+  outline: 3px solid #3446c4;
+  outline-offset: 2px;
+}
+
+.tag-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .todo-filters select {
@@ -276,6 +326,7 @@ button:disabled {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 
@@ -397,6 +448,104 @@ button:disabled {
   margin-top: 0.75rem;
 }
 
+.manage-tags-dialog {
+  width: min(100%, 38rem);
+  max-height: min(90vh, 48rem);
+  overflow-y: auto;
+  border: 1px solid #e0e5ef;
+  border-radius: 0.9rem;
+  background: white;
+  padding: 1.5rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 20%);
+}
+
+.manage-tags-heading,
+.tag-manage-list li,
+.tag-manage-actions,
+.tag-color-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.manage-tags-heading {
+  justify-content: space-between;
+}
+
+.manage-tags-heading h2 {
+  margin: 0;
+}
+
+.tag-manage-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-manage-list li {
+  justify-content: space-between;
+  border-bottom: 1px solid #e5e9f1;
+  padding-bottom: 0.65rem;
+}
+
+.tag-manage-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tag-action {
+  border: 0;
+  background: transparent;
+  color: #3446c4;
+  font-weight: 600;
+}
+
+.tag-delete-action {
+  color: #a5342e;
+}
+
+.tag-create-form,
+.tag-edit-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.tag-create-form {
+  border-top: 1px solid #e5e9f1;
+  padding-top: 1rem;
+}
+
+.tag-create-form label,
+.tag-edit-form label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tag-create-form input:not([type="color"]),
+.tag-edit-form input:not([type="color"]) {
+  min-width: 0;
+  min-height: 2.6rem;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.tag-color-fields input[type="color"] {
+  width: 3rem;
+  height: 2.6rem;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.4rem;
+  padding: 0.15rem;
+}
+
+.tag-color-fields input:not([type="color"]) {
+  flex: 1;
+}
+
 @media (max-width: 28rem) {
   .home-card,
   .auth-card,
@@ -462,10 +611,18 @@ button:disabled {
   .todo-form select,
   .todo-filters select,
   .edit-form input,
-  .edit-form select {
+  .edit-form select,
+  .manage-tags-dialog,
+  .tag-create-form input:not([type="color"]),
+  .tag-edit-form input:not([type="color"]) {
     border-color: #475569;
     background: #0f172a;
     color: #e2e8f0;
+  }
+
+  .manage-tags-dialog {
+    border-color: #334155;
+    background: #1e293b;
   }
 
   .todo-section {
@@ -492,5 +649,18 @@ button:disabled {
     border-color: #475569;
     background: #1e293b;
     color: #e2e8f0;
+  }
+
+  .tag-manage-list li,
+  .tag-create-form {
+    border-color: #334155;
+  }
+
+  .tag-action {
+    color: #93c5fd;
+  }
+
+  .tag-delete-action {
+    color: #fca5a5;
   }
 }

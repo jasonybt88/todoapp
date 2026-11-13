@@ -1,9 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CreateTodoInput, Priority, Todo, UpdateTodoInput } from "@/lib/db";
+import type {
+  CreateTagInput,
+  CreateTodoInput,
+  Priority,
+  Tag,
+  Todo,
+  UpdateTagInput,
+  UpdateTodoInput,
+} from "@/lib/db";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
+import { ManageTagsModal, TagPill, TagSelector } from "@/components/TagControls";
 import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
 import { sectionTodos, validateDueDate, validateTodoTitle } from "@/lib/todo";
 
@@ -16,6 +25,7 @@ interface EditDraft {
   dueDate: string;
   priority: Priority;
   reminderMinutes: number | null;
+  tagIds: number[];
 }
 
 function ReminderSelect({
@@ -91,11 +101,13 @@ function TodoRow({
   onToggle,
   onEdit,
   onDelete,
+  onFilterTag,
 }: {
   todo: Todo;
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onFilterTag: (tag: Tag) => void;
 }) {
   return (
     <li className={`todo-item${todo.completed ? " todo-completed" : ""}`} data-testid="todo-card">
@@ -114,6 +126,14 @@ function TodoRow({
         </span>
       </label>
       <div className="todo-meta">
+        {todo.tags.map((tag) => (
+          <TagPill
+            key={tag.id}
+            tag={tag}
+            label={`Filter by tag ${tag.name}`}
+            onClick={() => onFilterTag(tag)}
+          />
+        ))}
         {todo.reminder_minutes !== null && isReminderMinutes(todo.reminder_minutes) && (
           <span className="reminder-badge" aria-label="Reminder">
             {"🔔"} {REMINDER_OPTIONS.find((option) => option.minutes === todo.reminder_minutes)?.short}
@@ -143,9 +163,13 @@ function TodoRow({
 
 export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
+  const [tagFilter, setTagFilter] = useState<number | "all">("all");
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [reminderMinutes, setReminderMinutes] = useState<number | null>(null);
   const createDraftRevision = useRef(0);
@@ -158,9 +182,15 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
 
   useEffect(() => {
     let active = true;
-    requestJson<Todo[]>("/api/todos")
-      .then((result) => {
-        if (active) setTodos(result);
+    Promise.all([
+      requestJson<Todo[]>("/api/todos"),
+      requestJson<Tag[]>("/api/tags"),
+    ])
+      .then(([todoResult, tagResult]) => {
+        if (active) {
+          setTodos(todoResult);
+          setTags(tagResult);
+        }
       })
       .catch((cause: unknown) => {
         if (active) {
@@ -200,11 +230,13 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     () =>
       sectionTodos(
         todos.filter(
-          (todo) => priorityFilter === "all" || todo.priority === priorityFilter,
+          (todo) =>
+            (priorityFilter === "all" || todo.priority === priorityFilter) &&
+            (tagFilter === "all" || todo.tags.some((tag) => tag.id === tagFilter)),
         ),
         now,
       ),
-    [todos, now, priorityFilter],
+    [todos, now, priorityFilter, tagFilter],
   );
 
   async function addTodo(event: React.FormEvent<HTMLFormElement>) {
@@ -230,6 +262,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       priority,
       due_date: validatedDueDate.value,
       reminder_minutes: reminderMinutes,
+      tag_ids: selectedTagIds,
     };
     const temporaryId = -Date.now();
     const optimisticTodo: Todo = {
@@ -246,7 +279,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       created_at: getSingaporeNow().toISOString(),
       updated_at: null,
       subtasks: [],
-      tags: [],
+      tags: tags.filter((tag) => selectedTagIds.includes(tag.id)),
     };
     setTodos((current) => [...current, optimisticTodo]);
 
@@ -263,6 +296,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         setPriority("medium");
         setDueDate("");
         setReminderMinutes(null);
+        setSelectedTagIds([]);
       }
     } catch (cause) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
@@ -275,8 +309,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     if (!previous) return false;
 
     setError(null);
+    const { tag_ids: tagIds, ...todoFields } = input;
     setTodos((current) =>
-      current.map((todo) => (todo.id === id ? { ...todo, ...input } : todo)),
+      current.map((todo) =>
+        todo.id === id
+          ? {
+              ...todo,
+              ...todoFields,
+              ...(tagIds === undefined
+                ? {}
+                : { tags: tags.filter((tag) => tagIds.includes(tag.id)) }),
+            }
+          : todo,
+      ),
     );
     try {
       const saved = await requestJson<Todo>(`/api/todos/${id}`, {
@@ -313,6 +358,54 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     }
   }
 
+  async function createTag(input: CreateTagInput) {
+    const created = await requestJson<Tag>("/api/tags", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    setTags((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }
+
+  async function updateTag(id: number, input: UpdateTagInput) {
+    const updated = await requestJson<Tag>(`/api/tags/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+    setTags((current) =>
+      current
+        .map((tag) => (tag.id === id ? updated : tag))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setTodos((current) =>
+      current.map((todo) => ({
+        ...todo,
+        tags: todo.tags.map((tag) => (tag.id === id ? updated : tag)),
+      })),
+    );
+  }
+
+  async function deleteTag(id: number) {
+    await requestJson<{ success: boolean }>(`/api/tags/${id}`, {
+      method: "DELETE",
+    });
+    setTags((current) => current.filter((tag) => tag.id !== id));
+    setTodos((current) =>
+      current.map((todo) => ({
+        ...todo,
+        tags: todo.tags.filter((tag) => tag.id !== id),
+      })),
+    );
+    setSelectedTagIds((current) => current.filter((tagId) => tagId !== id));
+    setEditDraft((current) =>
+      current
+        ? { ...current, tagIds: current.tagIds.filter((tagId) => tagId !== id) }
+        : current,
+    );
+    if (tagFilter === id) setTagFilter("all");
+  }
+
   function startEditing(todo: Todo) {
     setEditing(todo);
     setEditDraft({
@@ -320,6 +413,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       dueDate: todo.due_date ? formatSingaporeDateTimeInput(todo.due_date) : "",
       priority: todo.priority,
       reminderMinutes: todo.reminder_minutes,
+      tagIds: todo.tags.map((tag) => tag.id),
     });
   }
 
@@ -347,6 +441,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       ...(editDraft.reminderMinutes !== editing.reminder_minutes
         ? { reminder_minutes: editDraft.reminderMinutes }
         : {}),
+      tag_ids: editDraft.tagIds,
     });
     if (saved) {
       setEditing(null);
@@ -372,6 +467,13 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
             {notifications.permission === "granted" ? "🔔 Notifications On" :
               notifications.permission === "denied" ? "Notifications blocked in browser" :
                 notifications.permission === "unsupported" ? "Notifications unavailable" : "🔔 Enable Notifications"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setManageTagsOpen(true)}
+          >
+            Manage Tags
           </button>
         </div>
       </div>
@@ -432,6 +534,22 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         </button>
       </form>
 
+      <div className="todo-tag-entry">
+        <span className="tag-field-label">Tags</span>
+        <TagSelector
+          tags={tags}
+          selectedIds={selectedTagIds}
+          onToggle={(id) => {
+            createDraftRevision.current += 1;
+            setSelectedTagIds((current) =>
+              current.includes(id)
+                ? current.filter((tagId) => tagId !== id)
+                : [...current, id],
+            );
+          }}
+        />
+      </div>
+
       <div className="todo-filters">
         <label htmlFor="priority-filter">Filter by priority</label>
         <select
@@ -445,6 +563,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           <option value="high">High Priority</option>
           <option value="medium">Medium Priority</option>
           <option value="low">Low Priority</option>
+        </select>
+        <label htmlFor="tag-filter">Filter by tag</label>
+        <select
+          id="tag-filter"
+          value={tagFilter}
+          onChange={(event) =>
+            setTagFilter(event.target.value === "all" ? "all" : Number(event.target.value))
+          }
+        >
+          <option value="all">All Tags</option>
+          {tags.map((tag) => (
+            <option key={tag.id} value={tag.id}>{tag.name}</option>
+          ))}
         </select>
       </div>
 
@@ -460,10 +591,20 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <p className="muted" role="status">Loading todos...</p>
       ) : (
         <div className="todo-sections">
-          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
-          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
-          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} />
+          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onFilterTag={(tag) => setTagFilter(tag.id)} />
+          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onFilterTag={(tag) => setTagFilter(tag.id)} />
+          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onFilterTag={(tag) => setTagFilter(tag.id)} />
         </div>
+      )}
+
+      {manageTagsOpen && (
+        <ManageTagsModal
+          tags={tags}
+          onClose={() => setManageTagsOpen(false)}
+          onCreate={createTag}
+          onUpdate={updateTag}
+          onDelete={deleteTag}
+        />
       )}
 
       {editing && editDraft && (
@@ -528,6 +669,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                 disabled={!editDraft.dueDate}
                 onChange={(value) => setEditDraft({ ...editDraft, reminderMinutes: value })}
               />
+              <span className="tag-field-label">Tags</span>
+              <TagSelector
+                tags={tags}
+                selectedIds={editDraft.tagIds}
+                onToggle={(id) =>
+                  setEditDraft({
+                    ...editDraft,
+                    tagIds: editDraft.tagIds.includes(id)
+                      ? editDraft.tagIds.filter((tagId) => tagId !== id)
+                      : [...editDraft.tagIds, id],
+                  })
+                }
+              />
               <div className="edit-actions">
                 <button className="primary-button" type="submit">Update</button>
                 <button
@@ -555,12 +709,14 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onFilterTag,
 }: {
   title: string;
   todos: Todo[];
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onFilterTag: (tag: Tag) => void;
 }) {
   const headingId = `section-${title.toLowerCase()}`;
   return (
@@ -577,6 +733,7 @@ function TodoSection({
               onToggle={onToggle}
               onEdit={onEdit}
               onDelete={onDelete}
+              onFilterTag={onFilterTag}
             />
           ))}
         </ul>
