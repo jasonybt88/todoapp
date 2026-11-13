@@ -42,6 +42,26 @@ function futureSingaporeInput(hoursAhead = 1): string {
     .replace(" ", "T");
 }
 
+function relativeLuminance(color: string): number {
+  const channels = color.match(/\d+/g)?.slice(0, 3).map(Number);
+  if (!channels || channels.length !== 3) {
+    throw new Error(`Unexpected computed color: ${color}`);
+  }
+  const linear = channels.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const brightest = Math.max(foregroundLuminance, backgroundLuminance);
+  const darkest = Math.min(foregroundLuminance, backgroundLuminance);
+  return (brightest + 0.05) / (darkest + 0.05);
+}
+
 test("creates todos with default fields and optional due dates", async ({
   page,
   context,
@@ -61,7 +81,12 @@ test("creates todos with default fields and optional due dates", async ({
   await page.getByLabel("Due date and time (Singapore)").fill(futureSingaporeInput());
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText("Tomorrow task", { exact: true })).toBeVisible();
-  await expect(page.getByText("high", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByTestId("todo-card")
+      .filter({ hasText: "Tomorrow task" })
+      .locator(".priority-badge"),
+  ).toHaveText("High");
 });
 
 test("edits, toggles, cancels, and deletes with immediate list updates", async ({
@@ -82,6 +107,7 @@ test("edits, toggles, cancels, and deletes with immediate list updates", async (
     .last()
     .fill(futureSingaporeInput(2));
   await page.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Updated task", { exact: true })).toBeVisible();
 
   const updatedCard = page.getByTestId("todo-card").filter({ hasText: "Updated task" });
@@ -153,12 +179,17 @@ test("validates priority writes and filters the API list", async ({ page, contex
   const medium = await page.request.post("/api/todos", {
     data: { title: "Default priority task" },
   });
+  const nullDefault = await page.request.post("/api/todos", {
+    data: { title: "Null priority default task", priority: null },
+  });
   const low = await page.request.post("/api/todos", {
     data: { title: "Low task", priority: "low" },
   });
   expect(high.status()).toBe(201);
   expect(medium.status()).toBe(201);
+  expect(nullDefault.status()).toBe(201);
   expect(low.status()).toBe(201);
+  expect(await nullDefault.json()).toMatchObject({ priority: "medium" });
   const highTodo = (await high.json()) as { id: number };
 
   const invalidCreate = await page.request.post("/api/todos", {
@@ -187,13 +218,83 @@ test("validates priority writes and filters the API list", async ({ page, contex
   expect(invalidUpdate.status()).toBe(400);
   const unchanged = await page.request.get(`/api/todos/${highTodo.id}`);
   expect(await unchanged.json()).toMatchObject({ priority: "high" });
+  const titleUpdate = await page.request.put(`/api/todos/${highTodo.id}`, {
+    data: { title: "Renamed high task" },
+  });
+  expect(await titleUpdate.json()).toMatchObject({
+    title: "Renamed high task",
+    priority: "high",
+  });
 
   const todos = await page.request.get("/api/todos");
   expect((await todos.json()).map((todo: { title: string }) => todo.title).sort()).toEqual([
     "Default priority task",
-    "High task",
     "Low task",
+    "Null priority default task",
+    "Renamed high task",
   ]);
+});
+
+test("sorts, filters, and reorders priority badges accessibly", async ({
+  page,
+  context,
+}) => {
+  await register(page, context);
+
+  for (const [title, priority] of [
+    ["Someday", "low"],
+    ["Critical", "high"],
+    ["Normal", "medium"],
+  ]) {
+    await page.getByLabel("Todo title").fill(title);
+    await page.getByLabel("Priority", { exact: true }).selectOption(priority);
+    const savedTodo = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/todos") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await savedTodo;
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
+  }
+
+  const pending = page.locator(".todo-section").filter({
+    has: page.getByRole("heading", { name: "Pending (3)" }),
+  });
+  await expect(pending.locator(".todo-text strong")).toHaveText([
+    "Critical",
+    "Normal",
+    "Someday",
+  ]);
+  await expect(page.getByTestId("todo-card").getByText("High", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("todo-card").getByText("Medium", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("todo-card").getByText("Low", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Filter by priority").selectOption("high");
+  await expect(page.getByTestId("todo-card")).toHaveCount(1);
+  const critical = page.getByTestId("todo-card").filter({ hasText: "Critical" });
+  await critical.getByRole("button", { name: "Edit Critical" }).click();
+  await page.getByRole("dialog").getByLabel("Priority").selectOption("low");
+  await page.getByRole("button", { name: "Update" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByTestId("todo-card")).toHaveCount(0);
+
+  await page.getByLabel("Filter by priority").selectOption("all");
+  await expect(page.getByTestId("todo-card")).toHaveCount(3);
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    const badgeColors = await page.locator(".priority-badge").evaluateAll((badges) =>
+      badges.map((badge) => {
+        const style = getComputedStyle(badge);
+        return { foreground: style.color, background: style.backgroundColor };
+      }),
+    );
+    expect(badgeColors).toHaveLength(3);
+    for (const colors of badgeColors) {
+      expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
+    }
+  }
 });
 
 test("rejects unauthenticated requests and hides another user's todos", async ({

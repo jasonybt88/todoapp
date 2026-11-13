@@ -42,10 +42,14 @@ test("registers passkeys on two devices, logs in, and preserves the session", as
   await register(page, username);
   await expect(page.getByText(`Signed in as ${username}`)).toBeVisible();
 
-  const secondContext = await createSignedInContext(browser, context);
+  const secondContext = await createSignedInContext(
+    browser,
+    context,
+    new URL(page.url()).origin,
+  );
   try {
     const secondPage = await secondContext.newPage();
-    await secondPage.goto("http://localhost:3000/");
+    await secondPage.goto("/");
     await addVirtualAuthenticator(secondContext, secondPage);
     await secondPage.getByRole("button", { name: "Add another passkey" }).click();
     await expect(secondPage.getByText("Passkey added")).toBeVisible({
@@ -103,9 +107,10 @@ test("rejects duplicate usernames and unregistered logins", async ({
 async function createSignedInContext(
   browser: Browser,
   sourceContext: BrowserContext,
+  baseURL: string,
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
-    baseURL: "http://localhost:3000",
+    baseURL,
     timezoneId: "Asia/Singapore",
   });
   await context.addCookies(await sourceContext.cookies());

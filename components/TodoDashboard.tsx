@@ -15,6 +15,12 @@ interface EditDraft {
   priority: Priority;
 }
 
+const PRIORITY_LABELS: Record<Priority, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -66,8 +72,11 @@ function TodoRow({
         </span>
       </label>
       <div className="todo-meta">
-        <span className={`priority-badge priority-${todo.priority}`}>
-          {todo.priority}
+        <span
+          className={`priority-badge priority-${todo.priority}`}
+          aria-label={`${PRIORITY_LABELS[todo.priority]} priority`}
+        >
+          {PRIORITY_LABELS[todo.priority]}
         </span>
         <button type="button" onClick={() => onEdit(todo)} aria-label={`Edit ${todo.title}`}>
           Edit
@@ -89,6 +98,7 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
+  const [priorityFilter, setPriorityFilter] = useState<Priority | "all">("all");
   const [dueDate, setDueDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,7 +146,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [editing]);
 
-  const sections = useMemo(() => sectionTodos(todos, now), [todos, now]);
+  const sections = useMemo(
+    () =>
+      sectionTodos(
+        todos.filter(
+          (todo) => priorityFilter === "all" || todo.priority === priorityFilter,
+        ),
+        now,
+      ),
+    [todos, now, priorityFilter],
+  );
 
   async function addTodo(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -322,6 +341,22 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           Add
         </button>
       </form>
+
+      <div className="todo-filters">
+        <label htmlFor="priority-filter">Filter by priority</label>
+        <select
+          id="priority-filter"
+          value={priorityFilter}
+          onChange={(event) =>
+            setPriorityFilter(event.target.value as Priority | "all")
+          }
+        >
+          <option value="all">All Priorities</option>
+          <option value="high">High Priority</option>
+          <option value="medium">Medium Priority</option>
+          <option value="low">Low Priority</option>
+        </select>
+      </div>
 
       {error && (
         <p className="message error-message" role="alert">

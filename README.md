@@ -28,8 +28,10 @@ is no password fallback.
 Routes are `GET/POST /api/todos` and `GET/PUT/DELETE /api/todos/:id`. All
 requests use the `auth_session` HTTP-only cookie; todo reads and writes are
 scoped to the current session. Due dates are validated server-side and displayed
-in Singapore time. See [docs/todo-api.md](docs/todo-api.md) for request fields,
-response shapes, and error behavior.
+in Singapore time. Priorities are `high`, `medium`, or `low`; the web list can
+filter by priority, and API consumers can use `GET /api/todos?priority=high`.
+See [docs/todo-api.md](docs/todo-api.md) for request fields, response shapes,
+and error behavior.
 
 ## CLI
 

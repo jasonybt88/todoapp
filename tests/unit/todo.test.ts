@@ -98,6 +98,23 @@ describe("todo sorting and sections", () => {
     expect(todos).toEqual(original);
   });
 
+  it("sorts 500 todos within the client-side performance target", () => {
+    const todos = Array.from({ length: 500 }, (_, index) =>
+      todo(index + 1, {
+        priority: (["high", "medium", "low"] as const)[index % 3],
+        due_date:
+          index % 2 === 0
+            ? new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString()
+            : null,
+      }),
+    );
+    const startedAt = performance.now();
+
+    sortTodos(todos);
+
+    expect(performance.now() - startedAt).toBeLessThan(50);
+  });
+
   it("places due-at-now items in Pending and completed items in Completed", () => {
     const now = new Date("2026-01-01T00:00:00.000Z");
     const sections = sectionTodos(
