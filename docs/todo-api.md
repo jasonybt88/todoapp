@@ -40,7 +40,8 @@ returned by the check endpoint. The update returns `409` if the reminder was
 changed, completed, or already marked since the check.
 Notification delivery-marking updates return the marked `Todo` directly;
 ordinary updates return the `{ "todo": Todo, "nextInstance"?: Todo }` envelope.
-Subtask creation and tag management have separate feature contracts.
+Subtask completion is independent of its parent. Tag management has a separate
+feature contract.
 
 Set `is_recurring` to `true` with a valid `recurrence_pattern` (`daily`,
 `weekly`, `monthly`, or `yearly`) and a non-null `due_date` to enable recurrence.
@@ -57,7 +58,16 @@ pattern for that todo and does not change any already-created occurrence.
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
 | `PUT`  | `/api/todos/:id` | `200 { "todo": Todo, "nextInstance"?: Todo }` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
+| `GET` | `/api/holidays` | `200 { "holidays": Holiday[] }` | — |
+| `GET` | `/api/holidays?year=2026&month=12` | `200 { "holidays": Holiday[] }` | Optional `YYYY` and `MM` pair; results include visible adjacent calendar dates |
 | `GET` | `/api/notifications/check` | `200 { "success": true, "data": Todo[] }` | — |
+| `POST` | `/api/todos/:id/subtasks` | `201 Subtask` | `{ title }` |
+| `PUT` | `/api/subtasks/:id` | `200 Subtask` | `{ title?, completed? }` |
+| `DELETE` | `/api/subtasks/:id` | `200 { "success": true }` | — |
+
+Holiday records are global and read-only through the API. The calendar database
+seeds Singapore public holidays for 2025–2027 when initialized; the seed command
+can be rerun safely.
 
 Creation trims and requires a non-empty title. A missing or `null` priority on
 creation defaults to `medium`; otherwise it must be `high`, `medium`, or `low`.
@@ -78,6 +88,11 @@ reminder offset, and tags. Other updates return `{ "todo": Todo }`.
 
 SQLite stores booleans as integers and enables foreign keys at connection
 initialization. Deleting a todo therefore cascades to its subtasks and tag links.
+Subtask titles are trimmed and required, completion is boolean, and ownership
+is inherited from the parent todo. Missing or another user's subtasks return
+404. New positions are one greater than the current maximum; deletion leaves
+other positions unchanged. The dashboard searches todo and subtask titles
+locally among the current user's loaded todos.
 
 The notification check includes incomplete, unsent reminders whose window has
 opened, including overdue reminders. Times are compared as UTC instants; naive

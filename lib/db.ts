@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { getCalendarVisibleRange } from "@/lib/calendar";
+import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
 import type { Priority } from "@/lib/priority";
 
 export {
@@ -45,6 +47,12 @@ export interface Tag {
   created_at: string;
 }
 
+export interface Holiday {
+  id: number;
+  date: string;
+  name: string;
+}
+
 export interface Todo {
   id: number;
   user_id: number;
@@ -79,6 +87,11 @@ export interface UpdateTodoInput extends Partial<CreateTodoInput> {
 
 export interface CreateSubtaskInput {
   title: string;
+}
+
+export interface UpdateSubtaskInput {
+  title?: string;
+  completed?: boolean;
 }
 
 export type ChallengePurpose = "registration" | "authentication";
@@ -159,6 +172,14 @@ function createDatabase(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
 
+    CREATE TABLE IF NOT EXISTS holidays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date);
+
     CREATE TABLE IF NOT EXISTS auth_challenges (
       username TEXT NOT NULL,
       purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')),
@@ -167,6 +188,7 @@ function createDatabase(): Database.Database {
       PRIMARY KEY (username, purpose)
     );
   `);
+  seedHolidayRows(db, SINGAPORE_PUBLIC_HOLIDAYS);
 
   return db;
 }
@@ -175,6 +197,45 @@ function getDatabase(): Database.Database {
   database ??= createDatabase();
   return database;
 }
+
+function seedHolidayRows(
+  db: Database.Database,
+  holidays: readonly HolidaySeed[],
+): void {
+  const insert = db.prepare(
+    `INSERT INTO holidays (date, name) VALUES (?, ?)
+     ON CONFLICT(date) DO UPDATE SET name = excluded.name`,
+  );
+  const seed = db.transaction(() => {
+    for (const holiday of holidays) {
+      insert.run(holiday.date, holiday.name);
+    }
+  });
+  seed();
+}
+
+export function seedSingaporeHolidays(): void {
+  seedHolidayRows(getDatabase(), SINGAPORE_PUBLIC_HOLIDAYS);
+}
+
+export const holidayDB = {
+  findAll(): Holiday[] {
+    return getDatabase()
+      .prepare("SELECT id, date, name FROM holidays ORDER BY date, name")
+      .all() as Holiday[];
+  },
+
+  findByMonth(year: number, month: number): Holiday[] {
+    const { start, end } = getCalendarVisibleRange(year, month);
+    return getDatabase()
+      .prepare(
+        `SELECT id, date, name FROM holidays
+         WHERE date BETWEEN ? AND ?
+         ORDER BY date, name`,
+      )
+      .all(start, end) as Holiday[];
+  },
+};
 
 export function findUserByUsername(username: string): User | null {
   const user = getDatabase()
@@ -619,6 +680,54 @@ export const subtaskDB = {
     });
 
     return create();
+  },
+
+  createForUser(todoId: number, userId: number, input: CreateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const owner = db.prepare("SELECT id FROM todos WHERE id = ? AND user_id = ?")
+        .get(todoId, userId);
+      return owner ? subtaskDB.create(todoId, input) : null;
+    })();
+  },
+
+  findByIdForUser(id: number, userId: number): Subtask | null {
+    const row = getDatabase().prepare(
+      `SELECT subtasks.id, subtasks.todo_id, subtasks.title, subtasks.completed,
+              subtasks.position, subtasks.created_at
+       FROM subtasks JOIN todos ON todos.id = subtasks.todo_id
+       WHERE subtasks.id = ? AND todos.user_id = ?`,
+    ).get(id, userId) as SubtaskRow | undefined;
+    return row ? mapSubtask(row) : null;
+  },
+
+  updateForUser(id: number, userId: number, input: UpdateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const fields: string[] = [];
+      const values: Array<string | number> = [];
+      if (input.title !== undefined) {
+        fields.push("title = ?");
+        values.push(input.title);
+      }
+      if (input.completed !== undefined) {
+        fields.push("completed = ?");
+        values.push(input.completed ? 1 : 0);
+      }
+      if (fields.length === 0) return subtaskDB.findByIdForUser(id, userId);
+      const result = db.prepare(
+        `UPDATE subtasks SET ${fields.join(", ")}
+         WHERE id = ? AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+      ).run(...values, id, userId);
+      return result.changes ? subtaskDB.findByIdForUser(id, userId) : null;
+    })();
+  },
+
+  deleteForUser(id: number, userId: number): boolean {
+    return getDatabase().prepare(
+      `DELETE FROM subtasks WHERE id = ?
+       AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+    ).run(id, userId).changes === 1;
   },
 };
 
