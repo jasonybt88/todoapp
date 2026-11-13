@@ -14,6 +14,7 @@ import type {
   UpdateTodoInput,
 } from "@/lib/db";
 import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
+import { ExportImportToolbar } from "@/components/ExportImportToolbar";
 import { TodoFilters } from "@/components/TodoFilters";
 import { requestJson } from "@/lib/client-http";
 import { applyFilters, DEFAULT_FILTER_STATE, type FilterState } from "@/lib/filters";
@@ -209,6 +210,22 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [editing, setEditing] = useState<Todo | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const notifications = useNotifications();
+
+  async function reloadDashboardData() {
+    const [todoResult, tagResult] = await Promise.all([
+      requestJson<Todo[]>("/api/todos"),
+      requestJson<Tag[]>("/api/tags"),
+    ]);
+    if (dashboardActive.current) {
+      setTodos(todoResult);
+      const availableTags = new Map<number, Tag>();
+      for (const todo of todoResult) {
+        for (const tag of todo.tags ?? []) availableTags.set(tag.id, tag);
+      }
+      for (const tag of tagResult) availableTags.set(tag.id, tag);
+      setTags([...availableTags.values()].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+  }
 
   useEffect(() => {
     dashboardActive.current = true;
@@ -557,6 +574,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           >
             Manage Tags
           </button>
+          <ExportImportToolbar
+            onImported={async () => {
+              try {
+                await reloadDashboardData();
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "Todos could not be refreshed.");
+                throw cause;
+              }
+            }}
+          />
         </div>
       </div>
 

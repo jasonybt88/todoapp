@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { getCalendarVisibleRange } from "@/lib/calendar";
 import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
 import type { Priority } from "@/lib/priority";
+import type { ImportResult, TodoExportItem } from "@/lib/todo-export";
 
 export {
   PRIORITY_ORDER,
@@ -632,6 +633,80 @@ export const todoDB = {
     return rows
       .map(({ id }) => findTodoWithRelations(id))
       .filter((todo): todo is Todo => todo !== null);
+  },
+
+  importAll(userId: number, items: readonly TodoExportItem[]): ImportResult {
+    const db = getDatabase();
+    const findUserTags = db.prepare(
+      "SELECT id, name FROM tags WHERE user_id = ? ORDER BY id",
+    );
+    const insertTodo = db.prepare(
+      `INSERT INTO todos
+        (user_id, title, completed, due_date, priority, is_recurring,
+         recurrence_pattern, reminder_minutes, last_notification_sent, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL)`,
+    );
+    const insertSubtask = db.prepare(
+      `INSERT INTO subtasks (todo_id, title, completed, position)
+       VALUES (?, ?, ?, ?)`,
+    );
+    const insertTag = db.prepare(
+      "INSERT INTO tags (user_id, name, color) VALUES (?, ?, ?)",
+    );
+    const linkTag = db.prepare(
+      "INSERT INTO todo_tags (todo_id, tag_id) VALUES (?, ?)",
+    );
+    const run = db.transaction((importItems: readonly TodoExportItem[]) => {
+      let tagsCreated = 0;
+      let tagsReused = 0;
+      const tagIds = new Map<string, number>();
+      const existingTags = findUserTags.all(userId) as Array<Pick<Tag, "id" | "name">>;
+      for (const tag of existingTags) {
+        const key = tag.name.toLowerCase();
+        if (!tagIds.has(key)) tagIds.set(key, tag.id);
+      }
+
+      for (const item of importItems) {
+        const result = insertTodo.run(
+          userId,
+          item.title,
+          item.completed ? 1 : 0,
+          item.due_date,
+          item.priority,
+          item.is_recurring ? 1 : 0,
+          item.recurrence_pattern,
+          item.reminder_minutes,
+          item.created_at,
+        );
+        const todoId = Number(result.lastInsertRowid);
+
+        item.subtasks.forEach((subtask, index) => {
+          insertSubtask.run(todoId, subtask.title, subtask.completed ? 1 : 0, index);
+        });
+
+        const linkedTags = new Set<number>();
+        for (const tag of item.tags) {
+          const key = tag.name.toLowerCase();
+          let tagId = tagIds.get(key);
+          let created = false;
+          if (tagId === undefined) {
+            tagId = Number(insertTag.run(userId, tag.name, tag.color).lastInsertRowid);
+            tagIds.set(key, tagId);
+            tagsCreated += 1;
+            created = true;
+          }
+          if (!linkedTags.has(tagId)) {
+            linkTag.run(todoId, tagId);
+            linkedTags.add(tagId);
+            if (!created) tagsReused += 1;
+          }
+        }
+      }
+
+      return { imported: importItems.length, tagsCreated, tagsReused };
+    });
+
+    return run(items);
   },
 
   findById(id: number): Todo | null {

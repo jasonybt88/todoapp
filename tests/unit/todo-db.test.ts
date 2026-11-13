@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import type { TodoExportItem } from "../../lib/todo-export";
 
 type DatabaseModule = typeof import("../../lib/db");
 let database: DatabaseModule;
@@ -157,6 +158,78 @@ describe("subtask persistence", () => {
     database.todoDB.delete(todo.id);
     expect(database.subtaskDB.findByTodoId(todo.id)).toEqual([]);
     expect(database.subtaskDB.findByIdForUser(second.id, owner.id)).toBeNull();
+  });
+});
+
+describe("todo import persistence", () => {
+  function importItem(title: string, tagName = "Work", tagColor = "#123456"): TodoExportItem {
+    return {
+      title,
+      completed: true,
+      due_date: "2026-03-01T10:00:00.000Z",
+      priority: "high",
+      is_recurring: true,
+      recurrence_pattern: "weekly",
+      reminder_minutes: 60,
+      created_at: "2026-02-01T10:00:00.000Z",
+      subtasks: [
+        { title: "First child", completed: true, position: 4 },
+        { title: "Second child", completed: false, position: 9 },
+      ],
+      tags: [{ name: tagName, color: tagColor }],
+    };
+  }
+
+  it("creates fresh related rows, reuses case-insensitive tags, and scopes imported todos", () => {
+    const owner = createUser("import-owner");
+    const other = createUser("import-other");
+    const original = database.todoDB.create(owner.id, { title: "Existing" });
+    const first = database.todoDB.importAll(owner.id, [importItem("First import")]);
+    const second = database.todoDB.importAll(owner.id, [
+      importItem("Second import", "work", "#abcdef"),
+    ]);
+
+    const todos = database.todoDB.findAllByUser(owner.id);
+    const imported = todos.filter((todo) => todo.title !== "Existing");
+    expect(first).toEqual({ imported: 1, tagsCreated: 1, tagsReused: 0 });
+    expect(second).toEqual({ imported: 1, tagsCreated: 0, tagsReused: 1 });
+    expect(imported).toHaveLength(2);
+    expect(imported.every((todo) => todo.id !== original.id)).toBe(true);
+    expect(imported[0]).toMatchObject({
+      completed: true,
+      due_date: "2026-03-01T10:00:00.000Z",
+      priority: "high",
+      is_recurring: true,
+      recurrence_pattern: "weekly",
+      reminder_minutes: 60,
+      last_notification_sent: null,
+      subtasks: [
+        { title: "First child", completed: true, position: 0 },
+        { title: "Second child", completed: false, position: 1 },
+      ],
+    });
+    expect(imported[0].subtasks[0].id).not.toBe(4);
+    expect(imported[0].tags).toEqual([
+      expect.objectContaining({ name: "Work", color: "#123456" }),
+    ]);
+    expect(imported[1].tags[0].id).toBe(imported[0].tags[0].id);
+    expect(imported[1].tags[0].color).toBe("#123456");
+    expect(database.todoDB.findAllByUser(other.id)).toEqual([]);
+  });
+
+  it("rolls back earlier rows when import fails partway through", () => {
+    const owner = createUser("import-rollback-owner");
+    const before = database.todoDB.findAllByUser(owner.id);
+    const malformed = {
+      ...importItem("Malformed import"),
+      subtasks: undefined,
+    } as unknown as TodoExportItem;
+
+    expect(() => database.todoDB.importAll(owner.id, [
+      importItem("Would be rolled back"),
+      malformed,
+    ])).toThrow();
+    expect(database.todoDB.findAllByUser(owner.id)).toEqual(before);
   });
 });
 
