@@ -92,12 +92,12 @@ npm run todo -- tags detach 12 5
 npm run todo -- tags delete 5
 ```
 
-Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
-`yearly`. Completing one creates its next occurrence.
-
 Tags are user-scoped, can be assigned in multiples to a todo, and can be
 managed from **Manage Tags** in the web dashboard. Deleting a tag removes its
 todo associations; the CLI and web UI use the same tag API.
+
+Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
+`yearly`. Completing one creates its next occurrence.
 
 ## Checks and release
 

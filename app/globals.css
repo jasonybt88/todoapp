@@ -1262,12 +1262,6 @@ button:disabled {
     color: #e2e8f0;
   }
 
-  .recurrence-badge {
-    border-color: #684c8d;
-    background: rgb(104 66 155 / 25%);
-    color: #dfcdf8;
-  }
-
   .tag-manage-list li,
   .tag-create-form {
     border-color: #334155;
@@ -1279,5 +1273,11 @@ button:disabled {
 
   .tag-delete-action {
     color: #fca5a5;
+  }
+
+  .recurrence-badge {
+    border-color: #684c8d;
+    background: rgb(104 66 155 / 25%);
+    color: #dfcdf8;
   }
 }

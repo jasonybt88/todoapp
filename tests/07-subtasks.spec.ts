@@ -164,7 +164,7 @@ test("rapid toggles update immediately and persist the last choice", async ({ pa
     }
     await route.continue();
   });
-  await card.getByRole("checkbox", { name: 'Mark subtask "Step" as complete' }).check();
+  await card.getByRole("checkbox", { name: 'Mark subtask "Step" as complete' }).click();
   await firstStarted;
   await expect(card.getByText("1/1 subtasks")).toBeVisible();
   await card.getByRole("checkbox", { name: 'Mark subtask "Step" as incomplete' }).uncheck();

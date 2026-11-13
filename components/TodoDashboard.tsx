@@ -101,23 +101,23 @@ function TodoRow({
   onToggle,
   onEdit,
   onDelete,
+  onFilterTag,
   onSubtasksChange,
   onError,
   operations,
   isTodoActive,
   nextTemporaryId,
-  onFilterTag,
 }: {
   todo: Todo;
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onFilterTag: (tag: Tag) => void;
   onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
   onError: (message: string | null) => void;
   operations: SubtaskOperations;
   isTodoActive: (id: number) => boolean;
   nextTemporaryId: () => number;
-  onFilterTag: (tag: Tag) => void;
 }) {
   return (
     <li
@@ -211,14 +211,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const notifications = useNotifications();
 
-  async function reloadTodos() {
+  async function reloadDashboardData() {
     const [todoResult, tagResult] = await Promise.all([
       requestJson<Todo[]>("/api/todos"),
       requestJson<Tag[]>("/api/tags"),
     ]);
     if (dashboardActive.current) {
       setTodos(todoResult);
-      setTags(tagResult);
+      const availableTags = new Map<number, Tag>();
+      for (const todo of todoResult) {
+        for (const tag of todo.tags ?? []) availableTags.set(tag.id, tag);
+      }
+      for (const tag of tagResult) availableTags.set(tag.id, tag);
+      setTags([...availableTags.values()].sort((a, b) => a.name.localeCompare(b.name)));
     }
   }
 
@@ -236,7 +241,12 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       .then(([todoResult, tagResult]) => {
         if (active) {
           setTodos(todoResult);
-          setTags(tagResult);
+          const availableTags = new Map<number, Tag>();
+          for (const todo of todoResult) {
+            for (const tag of todo.tags ?? []) availableTags.set(tag.id, tag);
+          }
+          for (const tag of tagResult) availableTags.set(tag.id, tag);
+          setTags([...availableTags.values()].sort((a, b) => a.name.localeCompare(b.name)));
         }
       })
       .catch((cause: unknown) => {
@@ -319,9 +329,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       priority,
       due_date: validatedDueDate.value,
       reminder_minutes: reminderMinutes,
+      tag_ids: selectedTagIds,
       is_recurring: isRecurring,
       recurrence_pattern: isRecurring ? recurrencePattern : null,
-      tag_ids: selectedTagIds,
     };
     const temporaryId = -Date.now();
     const optimisticTodo: Todo = {
@@ -355,9 +365,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         setPriority("medium");
         setDueDate("");
         setReminderMinutes(null);
+        setSelectedTagIds([]);
         setIsRecurring(false);
         setRecurrencePattern("daily");
-        setSelectedTagIds([]);
       }
     } catch (cause) {
       setTodos((current) => current.filter((todo) => todo.id !== temporaryId));
@@ -477,10 +487,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         ? { ...current, tagIds: current.tagIds.filter((tagId) => tagId !== id) }
         : current,
     );
-    setFilters((current) => ({
-      ...current,
-      tagId: current.tagId === id ? "all" : current.tagId,
-    }));
+    if (filters.tagId === id) {
+      setFilters((current) => ({ ...current, tagId: "all" }));
+    }
   }
 
   function startEditing(todo: Todo) {
@@ -490,9 +499,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       dueDate: todo.due_date ? formatSingaporeDateTimeInput(todo.due_date) : "",
       priority: todo.priority,
       reminderMinutes: todo.reminder_minutes,
+      tagIds: todo.tags.map((tag) => tag.id),
       isRecurring: todo.is_recurring,
       recurrencePattern: todo.recurrence_pattern ?? "daily",
-      tagIds: todo.tags.map((tag) => tag.id),
     });
   }
 
@@ -524,11 +533,11 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       ...(editDraft.reminderMinutes !== editing.reminder_minutes
         ? { reminder_minutes: editDraft.reminderMinutes }
         : {}),
+      tag_ids: editDraft.tagIds,
       is_recurring: editDraft.isRecurring,
       recurrence_pattern: editDraft.isRecurring
         ? editDraft.recurrencePattern
         : null,
-      tag_ids: editDraft.tagIds,
     });
     if (saved) {
       setEditing(null);
@@ -558,16 +567,6 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
               notifications.permission === "denied" ? "Notifications blocked in browser" :
                 notifications.permission === "unsupported" ? "Notifications unavailable" : "🔔 Enable Notifications"}
           </button>
-          <ExportImportToolbar
-            onImported={async () => {
-              try {
-                await reloadTodos();
-              } catch (cause) {
-                setError(cause instanceof Error ? cause.message : "Todos could not be refreshed.");
-                throw cause;
-              }
-            }}
-          />
           <button
             type="button"
             className="secondary-button"
@@ -575,6 +574,16 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           >
             Manage Tags
           </button>
+          <ExportImportToolbar
+            onImported={async () => {
+              try {
+                await reloadDashboardData();
+              } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "Todos could not be refreshed.");
+                throw cause;
+              }
+            }}
+          />
         </div>
       </div>
 
@@ -698,9 +707,22 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <p className="muted">No todos match your filters.</p>
       ) : (
         <div className="todo-sections">
-          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} onFilterTag={(tag) => setFilters((current) => ({ ...current, tagId: tag.id }))} />
-          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} onFilterTag={(tag) => setFilters((current) => ({ ...current, tagId: tag.id }))} />
-          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} onFilterTag={(tag) => setFilters((current) => ({ ...current, tagId: tag.id }))} />
+          {(["Overdue", "Pending", "Completed"] as const).map((title) => (
+            <TodoSection
+              key={title}
+              title={title}
+              todos={sections[title.toLowerCase() as "overdue" | "pending" | "completed"]}
+              onToggle={toggleTodo}
+              onEdit={startEditing}
+              onDelete={deleteTodo}
+              onFilterTag={(tag) => setFilters((current) => ({ ...current, tagId: tag.id }))}
+              onSubtasksChange={updateSubtasks}
+              onError={setError}
+              operations={subtaskOperations}
+              isTodoActive={isTodoActive}
+              nextTemporaryId={nextTemporaryId}
+            />
+          ))}
         </div>
       )}
 
@@ -777,6 +799,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                 disabled={!editDraft.dueDate}
                 onChange={(value) => setEditDraft({ ...editDraft, reminderMinutes: value })}
               />
+              <span className="tag-field-label">Tags</span>
+              <TagSelector
+                tags={tags}
+                selectedIds={editDraft.tagIds}
+                onToggle={(id) =>
+                  setEditDraft({
+                    ...editDraft,
+                    tagIds: editDraft.tagIds.includes(id)
+                      ? editDraft.tagIds.filter((tagId) => tagId !== id)
+                      : [...editDraft.tagIds, id],
+                  })
+                }
+              />
               <div className="recurrence-fields">
                 <label htmlFor="edit-recurring">
                   <input
@@ -812,19 +847,6 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
                 )}
                 {!editDraft.dueDate && <span>Set a due date to enable repeat</span>}
               </div>
-              <span className="tag-field-label">Tags</span>
-              <TagSelector
-                tags={tags}
-                selectedIds={editDraft.tagIds}
-                onToggle={(id) =>
-                  setEditDraft({
-                    ...editDraft,
-                    tagIds: editDraft.tagIds.includes(id)
-                      ? editDraft.tagIds.filter((tagId) => tagId !== id)
-                      : [...editDraft.tagIds, id],
-                  })
-                }
-              />
               <div className="edit-actions">
                 <button className="primary-button" type="submit">Update</button>
                 <button
@@ -852,24 +874,24 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onFilterTag,
   onSubtasksChange,
   onError,
   operations,
   isTodoActive,
   nextTemporaryId,
-  onFilterTag,
 }: {
   title: string;
   todos: Todo[];
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onFilterTag: (tag: Tag) => void;
   onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
   onError: (message: string | null) => void;
   operations: SubtaskOperations;
   isTodoActive: (id: number) => boolean;
   nextTemporaryId: () => number;
-  onFilterTag: (tag: Tag) => void;
 }) {
   const headingId = `section-${title.toLowerCase()}`;
   if (todos.length === 0) return null;
@@ -884,12 +906,12 @@ function TodoSection({
               onToggle={onToggle}
               onEdit={onEdit}
               onDelete={onDelete}
+              onFilterTag={onFilterTag}
               onSubtasksChange={onSubtasksChange}
               onError={onError}
               operations={operations}
               isTodoActive={isTodoActive}
               nextTemporaryId={nextTemporaryId}
-              onFilterTag={onFilterTag}
             />
           ))}
       </ul>
