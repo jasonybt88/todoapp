@@ -18,6 +18,61 @@ export interface Authenticator {
   created_at: string;
 }
 
+export type Priority = "high" | "medium" | "low";
+export type RecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
+
+export interface Subtask {
+  id: number;
+  todo_id: number;
+  title: string;
+  completed: boolean;
+  position: number;
+  created_at: string;
+}
+
+export interface Tag {
+  id: number;
+  user_id: number;
+  name: string;
+  color: string;
+  created_at: string;
+}
+
+export interface Todo {
+  id: number;
+  user_id: number;
+  title: string;
+  completed: boolean;
+  due_date: string | null;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  last_notification_sent: string | null;
+  created_at: string;
+  updated_at: string | null;
+  subtasks: Subtask[];
+  tags: Tag[];
+}
+
+export interface CreateTodoInput {
+  title: string;
+  due_date?: string | null;
+  priority?: Priority;
+  is_recurring?: boolean;
+  recurrence_pattern?: RecurrencePattern | null;
+  reminder_minutes?: number | null;
+  tag_ids?: number[];
+}
+
+export interface UpdateTodoInput extends Partial<CreateTodoInput> {
+  completed?: boolean;
+}
+
+export interface CreateSubtaskInput {
+  title: string;
+}
+
 export type ChallengePurpose = "registration" | "authentication";
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
@@ -51,6 +106,50 @@ function createDatabase(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_authenticators_user_id ON authenticators(user_id);
+
+    CREATE TABLE IF NOT EXISTS todos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      completed INTEGER NOT NULL DEFAULT 0,
+      due_date TEXT,
+      priority TEXT NOT NULL DEFAULT 'medium',
+      is_recurring INTEGER NOT NULL DEFAULT 0,
+      recurrence_pattern TEXT,
+      reminder_minutes INTEGER,
+      last_notification_sent TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id);
+    CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date);
+
+    CREATE TABLE IF NOT EXISTS subtasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      completed INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_subtasks_todo_id ON subtasks(todo_id);
+
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#3B82F6',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id);
+
+    CREATE TABLE IF NOT EXISTS todo_tags (
+      todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+      PRIMARY KEY (todo_id, tag_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
 
     CREATE TABLE IF NOT EXISTS auth_challenges (
       username TEXT NOT NULL,
@@ -185,6 +284,214 @@ export function updateAuthenticatorCounter(
     throw new Error("Authenticator counter could not be updated");
   }
 }
+
+interface TodoRow extends Omit<Todo, "completed" | "is_recurring" | "subtasks" | "tags"> {
+  completed: number;
+  is_recurring: number;
+}
+
+function mapTodo(row: TodoRow): Omit<Todo, "subtasks" | "tags"> {
+  return {
+    ...row,
+    completed: Boolean(row.completed),
+    is_recurring: Boolean(row.is_recurring),
+  };
+}
+
+function findTagsByTodoId(todoId: number): Tag[] {
+  return getDatabase()
+    .prepare(
+      `SELECT tags.id, tags.user_id, tags.name, tags.color, tags.created_at
+       FROM tags
+       INNER JOIN todo_tags ON todo_tags.tag_id = tags.id
+       WHERE todo_tags.todo_id = ?
+       ORDER BY tags.name COLLATE NOCASE`,
+    )
+    .all(todoId) as Tag[];
+}
+
+function findTodoWithRelations(id: number): Todo | null {
+  const row = getDatabase()
+    .prepare(
+      `SELECT id, user_id, title, completed, due_date, priority, is_recurring,
+              recurrence_pattern, reminder_minutes, last_notification_sent,
+              created_at, updated_at
+       FROM todos WHERE id = ?`,
+    )
+    .get(id) as TodoRow | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ...mapTodo(row),
+    subtasks: subtaskDB.findByTodoId(id),
+    tags: findTagsByTodoId(id),
+  };
+}
+
+function attachTodoTags(
+  db: Database.Database,
+  todoId: number,
+  userId: number,
+  tagIds: number[],
+): void {
+  const attach = db.prepare(
+    `INSERT INTO todo_tags (todo_id, tag_id)
+     SELECT ?, id FROM tags WHERE id = ? AND user_id = ?`,
+  );
+
+  for (const tagId of new Set(tagIds)) {
+    const result = attach.run(todoId, tagId, userId);
+    if (result.changes !== 1) {
+      throw new Error("Tag not found");
+    }
+  }
+}
+
+export const todoDB = {
+  create(userId: number, input: CreateTodoInput): Todo {
+    const db = getDatabase();
+    const create = db.transaction(() => {
+      const result = db
+        .prepare(
+          `INSERT INTO todos
+            (user_id, title, due_date, priority, is_recurring, recurrence_pattern, reminder_minutes)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          userId,
+          input.title.trim(),
+          input.due_date ?? null,
+          input.priority ?? "medium",
+          input.is_recurring ? 1 : 0,
+          input.recurrence_pattern ?? null,
+          input.reminder_minutes ?? null,
+        );
+      const id = Number(result.lastInsertRowid);
+      if (input.tag_ids?.length) {
+        attachTodoTags(db, id, userId, input.tag_ids);
+      }
+
+      const todo = findTodoWithRelations(id);
+      if (!todo) {
+        throw new Error("Newly created todo could not be loaded");
+      }
+      return todo;
+    });
+
+    return create();
+  },
+
+  findAllByUser(userId: number): Todo[] {
+    const rows = getDatabase()
+      .prepare("SELECT id FROM todos WHERE user_id = ?")
+      .all(userId) as Array<{ id: number }>;
+
+    return rows
+      .map(({ id }) => findTodoWithRelations(id))
+      .filter((todo): todo is Todo => todo !== null);
+  },
+
+  findById(id: number): Todo | null {
+    return findTodoWithRelations(id);
+  },
+
+  update(id: number, input: UpdateTodoInput): Todo | null {
+    const db = getDatabase();
+    const update = db.transaction(() => {
+      const fields: Array<{ column: string; value: string | number | null }> = [];
+      if (input.title !== undefined) fields.push({ column: "title", value: input.title });
+      if (input.due_date !== undefined) fields.push({ column: "due_date", value: input.due_date });
+      if (input.priority !== undefined) fields.push({ column: "priority", value: input.priority });
+      if (input.is_recurring !== undefined) {
+        fields.push({ column: "is_recurring", value: input.is_recurring ? 1 : 0 });
+      }
+      if (input.recurrence_pattern !== undefined) {
+        fields.push({ column: "recurrence_pattern", value: input.recurrence_pattern });
+      }
+      if (input.reminder_minutes !== undefined) {
+        fields.push({ column: "reminder_minutes", value: input.reminder_minutes });
+      }
+      if (input.completed !== undefined) {
+        fields.push({ column: "completed", value: input.completed ? 1 : 0 });
+      }
+
+      if (fields.length > 0) {
+        const assignments = fields.map(({ column }) => `${column} = ?`);
+        assignments.push("updated_at = datetime('now')");
+        db.prepare(`UPDATE todos SET ${assignments.join(", ")} WHERE id = ?`)
+          .run(...fields.map(({ value }) => value), id);
+      } else {
+        db.prepare("UPDATE todos SET updated_at = datetime('now') WHERE id = ?").run(id);
+      }
+
+      if (input.tag_ids !== undefined) {
+        db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
+        const owner = db
+          .prepare("SELECT user_id FROM todos WHERE id = ?")
+          .get(id) as { user_id: number } | undefined;
+        if (owner && input.tag_ids.length > 0) {
+          attachTodoTags(db, id, owner.user_id, input.tag_ids);
+        }
+      }
+
+      return findTodoWithRelations(id);
+    });
+
+    return update();
+  },
+
+  delete(id: number): void {
+    getDatabase().prepare("DELETE FROM todos WHERE id = ?").run(id);
+  },
+};
+
+interface SubtaskRow extends Omit<Subtask, "completed"> {
+  completed: number;
+}
+
+function mapSubtask(row: SubtaskRow): Subtask {
+  return { ...row, completed: Boolean(row.completed) };
+}
+
+export const subtaskDB = {
+  findByTodoId(todoId: number): Subtask[] {
+    const rows = getDatabase()
+      .prepare(
+        `SELECT id, todo_id, title, completed, position, created_at
+         FROM subtasks WHERE todo_id = ? ORDER BY position ASC, id ASC`,
+      )
+      .all(todoId) as SubtaskRow[];
+
+    return rows.map(mapSubtask);
+  },
+
+  create(todoId: number, input: CreateSubtaskInput): Subtask {
+    const db = getDatabase();
+    const create = db.transaction(() => {
+      const current = db
+        .prepare("SELECT COALESCE(MAX(position), -1) AS position FROM subtasks WHERE todo_id = ?")
+        .get(todoId) as { position: number };
+      const result = db
+        .prepare("INSERT INTO subtasks (todo_id, title, position) VALUES (?, ?, ?)")
+        .run(todoId, input.title.trim(), current.position + 1);
+      const row = db
+        .prepare(
+          `SELECT id, todo_id, title, completed, position, created_at
+           FROM subtasks WHERE id = ?`,
+        )
+        .get(Number(result.lastInsertRowid)) as SubtaskRow | undefined;
+      if (!row) {
+        throw new Error("Newly created subtask could not be loaded");
+      }
+      return mapSubtask(row);
+    });
+
+    return create();
+  },
+};
 
 export function saveChallenge(
   username: string,

@@ -8,5 +8,5 @@ export default async function HomePage() {
     redirect("/login");
   }
 
-  return <AuthHome username={session.username} />;
+  return <AuthHome username={session.username} userId={session.userId} />;
 }

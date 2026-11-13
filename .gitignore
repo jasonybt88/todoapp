@@ -2,6 +2,7 @@ node_modules/
 .next/
 /out/
 /build/
+/release/
 /coverage/
 /playwright-report/
 /test-results/

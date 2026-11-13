@@ -7,9 +7,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "build:release": "node scripts/build-release.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run && node --test tests/unit/cli.test.mjs",
+    "todo": "node cli/todo.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

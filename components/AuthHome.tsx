@@ -3,6 +3,7 @@
 import { startRegistration } from "@simplewebauthn/browser";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { TodoDashboard } from "@/components/TodoDashboard";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   RegistrationResponseJSON,
@@ -10,6 +11,7 @@ import type {
 
 interface AuthHomeProps {
   username: string;
+  userId: number;
 }
 
 interface ApiResponse {
@@ -34,7 +36,7 @@ async function postJson<T>(
   return result;
 }
 
-export function AuthHome({ username }: AuthHomeProps) {
+export function AuthHome({ username, userId }: AuthHomeProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export function AuthHome({ username }: AuthHomeProps) {
   }
 
   return (
-    <main className="page-shell">
+    <main className="app-shell">
       <section className="home-card" aria-labelledby="home-title">
         <p className="eyebrow">Todo App</p>
         <h1 id="home-title">Welcome back</h1>
@@ -124,6 +126,7 @@ export function AuthHome({ username }: AuthHomeProps) {
           </button>
         </div>
       </section>
+      <TodoDashboard userId={userId} />
     </main>
   );
 }
