@@ -222,8 +222,10 @@ test("validates priority writes and filters the API list", async ({ page, contex
     data: { title: "Renamed high task" },
   });
   expect(await titleUpdate.json()).toMatchObject({
-    title: "Renamed high task",
-    priority: "high",
+    todo: {
+      title: "Renamed high task",
+      priority: "high",
+    },
   });
 
   const todos = await page.request.get("/api/todos");

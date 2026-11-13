@@ -23,14 +23,36 @@ npm run dev
 Open `http://localhost:3000/login` and register or log in with a passkey. There
 is no password fallback.
 
+## Calendar
+
+The authenticated `/calendar` page shows due-dated todos by Singapore-local
+date, with priority colors, a day-detail dialog, and public holidays for 2025
+through 2027. The holiday list is seeded automatically when the SQLite database is
+initialized; it can also be refreshed with `npm run seed:holidays`. The dates
+are based on Singapore's [Ministry of Manpower public holiday calendar](https://www.mom.gov.sg/employment-practices/public-holidays)
+and should be reviewed when new years are announced.
+
+## Reminders
+
 Set a due date to choose a reminder, then use **Enable Notifications** to grant
 browser permission. Reminders are checked every 30 seconds while an app tab is
 open, including overdue reminders. They do not work with the browser closed;
 multiple tabs can occasionally produce duplicate notifications.
 
+Expand **Subtasks** on any todo to add and check off individual steps. The
+progress bar remains visible when collapsed. Parent and subtask completion are
+independent. The search field matches both todo and subtask titles.
+
+Search and quick priority and tag filters combine with the Advanced completion
+and Singapore-local due-date filters. Save a named filter in Advanced to reuse
+it in the same browser; saved filters are not synced across devices. The tag
+picker currently lists tags attached to loaded todos; tag management is not yet
+available. If a saved tag is unavailable, applying its preset uses all tags.
+
 ## Todo API
 
-Routes are `GET/POST /api/todos` and `GET/PUT/DELETE /api/todos/:id`. All
+Routes are `GET/POST /api/todos`, `GET/PUT/DELETE /api/todos/:id`, and
+`GET /api/holidays`. All
 requests use the `auth_session` HTTP-only cookie; todo reads and writes are
 scoped to the current session. Due dates are validated server-side and displayed
 in Singapore time. Priorities are `high`, `medium`, or `low`; the web list can
@@ -48,9 +70,11 @@ never commit or share it.
 ```powershell
 npm run todo -- list
 npm run todo -- create "Prepare report" --priority high
+npm run todo -- create "Pay rent" --due-date 2026-12-01T01:00:00.000Z --repeat monthly
 npm run todo -- get 12
 npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
+npm run todo -- update 12 --no-repeat
 npm run todo -- delete 12
 npm run todo -- tags list
 npm run todo -- tags create "Work" --color "#3B82F6"
@@ -63,6 +87,9 @@ npm run todo -- tags delete 5
 Tags are user-scoped, can be assigned in multiples to a todo, and can be
 managed from **Manage Tags** in the web dashboard. Deleting a tag removes its
 todo associations; the CLI and web UI use the same tag API.
+
+Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
+`yearly`. Completing one creates its next occurrence.
 
 ## Checks and release
 

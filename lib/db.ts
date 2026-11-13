@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { getCalendarVisibleRange } from "@/lib/calendar";
+import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
 import type { Priority } from "@/lib/priority";
 
 export {
@@ -8,6 +10,7 @@ export {
   PRIORITY_VALUES,
 } from "@/lib/priority";
 export type { Priority } from "@/lib/priority";
+import { calculateNextDueDate } from "./recurrence";
 
 export interface User {
   id: number;
@@ -54,6 +57,12 @@ export interface UpdateTagInput {
   color?: string;
 }
 
+export interface Holiday {
+  id: number;
+  date: string;
+  name: string;
+}
+
 export interface Todo {
   id: number;
   user_id: number;
@@ -88,6 +97,11 @@ export interface UpdateTodoInput extends Partial<CreateTodoInput> {
 
 export interface CreateSubtaskInput {
   title: string;
+}
+
+export interface UpdateSubtaskInput {
+  title?: string;
+  completed?: boolean;
 }
 
 export type ChallengePurpose = "registration" | "authentication";
@@ -168,6 +182,14 @@ function createDatabase(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
 
+    CREATE TABLE IF NOT EXISTS holidays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date);
+
     CREATE TABLE IF NOT EXISTS auth_challenges (
       username TEXT NOT NULL,
       purpose TEXT NOT NULL CHECK (purpose IN ('registration', 'authentication')),
@@ -176,6 +198,7 @@ function createDatabase(): Database.Database {
       PRIMARY KEY (username, purpose)
     );
   `);
+  seedHolidayRows(db, SINGAPORE_PUBLIC_HOLIDAYS);
 
   return db;
 }
@@ -184,6 +207,45 @@ function getDatabase(): Database.Database {
   database ??= createDatabase();
   return database;
 }
+
+function seedHolidayRows(
+  db: Database.Database,
+  holidays: readonly HolidaySeed[],
+): void {
+  const insert = db.prepare(
+    `INSERT INTO holidays (date, name) VALUES (?, ?)
+     ON CONFLICT(date) DO UPDATE SET name = excluded.name`,
+  );
+  const seed = db.transaction(() => {
+    for (const holiday of holidays) {
+      insert.run(holiday.date, holiday.name);
+    }
+  });
+  seed();
+}
+
+export function seedSingaporeHolidays(): void {
+  seedHolidayRows(getDatabase(), SINGAPORE_PUBLIC_HOLIDAYS);
+}
+
+export const holidayDB = {
+  findAll(): Holiday[] {
+    return getDatabase()
+      .prepare("SELECT id, date, name FROM holidays ORDER BY date, name")
+      .all() as Holiday[];
+  },
+
+  findByMonth(year: number, month: number): Holiday[] {
+    const { start, end } = getCalendarVisibleRange(year, month);
+    return getDatabase()
+      .prepare(
+        `SELECT id, date, name FROM holidays
+         WHERE date BETWEEN ? AND ?
+         ORDER BY date, name`,
+      )
+      .all(start, end) as Holiday[];
+  },
+};
 
 export function findUserByUsername(username: string): User | null {
   const user = getDatabase()
@@ -468,6 +530,66 @@ export const tagDB = {
   },
 };
 
+function updateTodoInTransaction(
+  db: Database.Database,
+  id: number,
+  input: UpdateTodoInput,
+): Todo | null {
+  const fields: Array<{ column: string; value: string | number | null }> = [];
+  if (input.title !== undefined) fields.push({ column: "title", value: input.title });
+  if (input.due_date !== undefined) fields.push({ column: "due_date", value: input.due_date });
+  if (input.priority !== undefined) fields.push({ column: "priority", value: input.priority });
+  if (input.is_recurring !== undefined) {
+    fields.push({ column: "is_recurring", value: input.is_recurring ? 1 : 0 });
+  }
+  if (input.recurrence_pattern !== undefined) {
+    fields.push({ column: "recurrence_pattern", value: input.recurrence_pattern });
+  }
+  if (input.reminder_minutes !== undefined) {
+    fields.push({ column: "reminder_minutes", value: input.reminder_minutes });
+  }
+  if (input.completed !== undefined) {
+    fields.push({ column: "completed", value: input.completed ? 1 : 0 });
+  }
+  if (input.last_notification_sent !== undefined) {
+    fields.push({
+      column: "last_notification_sent",
+      value: input.last_notification_sent,
+    });
+  } else if (input.due_date !== undefined || input.reminder_minutes !== undefined) {
+    const existing = findTodoWithRelations(id);
+    if (
+      existing &&
+      ((input.due_date !== undefined && input.due_date !== existing.due_date) ||
+        (input.reminder_minutes !== undefined &&
+          input.reminder_minutes !== existing.reminder_minutes))
+    ) {
+      fields.push({ column: "last_notification_sent", value: null });
+    }
+  }
+
+  if (fields.length > 0) {
+    const assignments = fields.map(({ column }) => `${column} = ?`);
+    assignments.push("updated_at = datetime('now')");
+    db.prepare(`UPDATE todos SET ${assignments.join(", ")} WHERE id = ?`)
+      .run(...fields.map(({ value }) => value), id);
+  } else {
+    db.prepare("UPDATE todos SET updated_at = datetime('now') WHERE id = ?").run(id);
+  }
+
+  if (input.tag_ids !== undefined) {
+    db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
+    const owner = db
+      .prepare("SELECT user_id FROM todos WHERE id = ?")
+      .get(id) as { user_id: number } | undefined;
+    if (owner && input.tag_ids.length > 0) {
+      attachTodoTags(db, id, owner.user_id, input.tag_ids);
+    }
+  }
+
+  return findTodoWithRelations(id);
+}
+
 export const todoDB = {
   create(userId: number, input: CreateTodoInput): Todo {
     const db = getDatabase();
@@ -552,60 +674,74 @@ export const todoDB = {
 
   update(id: number, input: UpdateTodoInput): Todo | null {
     const db = getDatabase();
-    const update = db.transaction(() => {
-      const fields: Array<{ column: string; value: string | number | null }> = [];
-      if (input.title !== undefined) fields.push({ column: "title", value: input.title });
-      if (input.due_date !== undefined) fields.push({ column: "due_date", value: input.due_date });
-      if (input.priority !== undefined) fields.push({ column: "priority", value: input.priority });
-      if (input.is_recurring !== undefined) {
-        fields.push({ column: "is_recurring", value: input.is_recurring ? 1 : 0 });
-      }
-      if (input.recurrence_pattern !== undefined) {
-        fields.push({ column: "recurrence_pattern", value: input.recurrence_pattern });
-      }
-      if (input.reminder_minutes !== undefined) {
-        fields.push({ column: "reminder_minutes", value: input.reminder_minutes });
-      }
-      if (input.completed !== undefined) {
-        fields.push({ column: "completed", value: input.completed ? 1 : 0 });
-      }
-      if (input.last_notification_sent !== undefined) {
-        fields.push({ column: "last_notification_sent", value: input.last_notification_sent });
-      } else if (input.due_date !== undefined || input.reminder_minutes !== undefined) {
-        const existing = findTodoWithRelations(id);
-        if (
-          existing &&
-          ((input.due_date !== undefined && input.due_date !== existing.due_date) ||
-            (input.reminder_minutes !== undefined &&
-              input.reminder_minutes !== existing.reminder_minutes))
-        ) {
-          fields.push({ column: "last_notification_sent", value: null });
-        }
-      }
-
-      if (fields.length > 0) {
-        const assignments = fields.map(({ column }) => `${column} = ?`);
-        assignments.push("updated_at = datetime('now')");
-        db.prepare(`UPDATE todos SET ${assignments.join(", ")} WHERE id = ?`)
-          .run(...fields.map(({ value }) => value), id);
-      } else {
-        db.prepare("UPDATE todos SET updated_at = datetime('now') WHERE id = ?").run(id);
-      }
-
-      if (input.tag_ids !== undefined) {
-        db.prepare("DELETE FROM todo_tags WHERE todo_id = ?").run(id);
-        const owner = db
-          .prepare("SELECT user_id FROM todos WHERE id = ?")
-          .get(id) as { user_id: number } | undefined;
-        if (owner && input.tag_ids.length > 0) {
-          attachTodoTags(db, id, owner.user_id, input.tag_ids);
-        }
-      }
-
-      return findTodoWithRelations(id);
-    });
+    const update = db.transaction(() => updateTodoInTransaction(db, id, input));
 
     return update();
+  },
+
+  updateAndCreateNextInstance(
+    id: number,
+    userId: number,
+    input: UpdateTodoInput,
+  ): { todo: Todo; nextInstance?: Todo } | null {
+    const db = getDatabase();
+    const update = db.transaction(() => {
+      const existing = findTodoWithRelations(id);
+      if (!existing || existing.user_id !== userId) {
+        return null;
+      }
+
+      const justCompleted = input.completed === true && !existing.completed;
+      const todo = updateTodoInTransaction(db, id, input);
+      if (!todo) {
+        return null;
+      }
+
+      if (
+        !justCompleted ||
+        !todo.is_recurring ||
+        !todo.recurrence_pattern ||
+        !todo.due_date
+      ) {
+        return { todo };
+      }
+
+      const nextDueDate = calculateNextDueDate(
+        todo.due_date,
+        todo.recurrence_pattern,
+      );
+      const result = db
+        .prepare(
+          `INSERT INTO todos
+            (user_id, title, due_date, priority, is_recurring, recurrence_pattern, reminder_minutes)
+           VALUES (?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          userId,
+          todo.title,
+          nextDueDate,
+          todo.priority,
+          todo.recurrence_pattern,
+          todo.reminder_minutes,
+        );
+      const nextId = Number(result.lastInsertRowid);
+      if (todo.tags.length > 0) {
+        attachTodoTags(
+          db,
+          nextId,
+          userId,
+          todo.tags.map(({ id: tagId }) => tagId),
+        );
+      }
+
+      const nextInstance = findTodoWithRelations(nextId);
+      if (!nextInstance) {
+        throw new Error("Newly created recurring todo could not be loaded");
+      }
+      return { todo, nextInstance };
+    });
+
+    return update.immediate();
   },
 
   delete(id: number): void {
@@ -655,6 +791,54 @@ export const subtaskDB = {
     });
 
     return create();
+  },
+
+  createForUser(todoId: number, userId: number, input: CreateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const owner = db.prepare("SELECT id FROM todos WHERE id = ? AND user_id = ?")
+        .get(todoId, userId);
+      return owner ? subtaskDB.create(todoId, input) : null;
+    })();
+  },
+
+  findByIdForUser(id: number, userId: number): Subtask | null {
+    const row = getDatabase().prepare(
+      `SELECT subtasks.id, subtasks.todo_id, subtasks.title, subtasks.completed,
+              subtasks.position, subtasks.created_at
+       FROM subtasks JOIN todos ON todos.id = subtasks.todo_id
+       WHERE subtasks.id = ? AND todos.user_id = ?`,
+    ).get(id, userId) as SubtaskRow | undefined;
+    return row ? mapSubtask(row) : null;
+  },
+
+  updateForUser(id: number, userId: number, input: UpdateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const fields: string[] = [];
+      const values: Array<string | number> = [];
+      if (input.title !== undefined) {
+        fields.push("title = ?");
+        values.push(input.title);
+      }
+      if (input.completed !== undefined) {
+        fields.push("completed = ?");
+        values.push(input.completed ? 1 : 0);
+      }
+      if (fields.length === 0) return subtaskDB.findByIdForUser(id, userId);
+      const result = db.prepare(
+        `UPDATE subtasks SET ${fields.join(", ")}
+         WHERE id = ? AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+      ).run(...values, id, userId);
+      return result.changes ? subtaskDB.findByIdForUser(id, userId) : null;
+    })();
+  },
+
+  deleteForUser(id: number, userId: number): boolean {
+    return getDatabase().prepare(
+      `DELETE FROM subtasks WHERE id = ?
+       AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+    ).run(id, userId).changes === 1;
   },
 };
 

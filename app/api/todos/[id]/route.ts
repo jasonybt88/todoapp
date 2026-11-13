@@ -5,7 +5,7 @@ import {
   type RecurrencePattern,
   type UpdateTodoInput,
 } from "@/lib/db";
-import { errorResponse, readJsonObject } from "@/lib/http";
+import { errorResponse, parsePositiveId, readJsonObject } from "@/lib/http";
 import { isReminderMinutes } from "@/lib/reminders";
 import { parseSingaporeDateTime } from "@/lib/timezone";
 import {
@@ -56,14 +56,6 @@ function isNotificationSnapshot(
     snapshot.reminder_minutes > 0;
 }
 
-function parseId(value: string): number | null {
-  if (!/^[1-9]\d*$/.test(value)) {
-    return null;
-  }
-  const id = Number(value);
-  return Number.isSafeInteger(id) ? id : null;
-}
-
 async function findOwnedTodo(id: number, userId: number) {
   const todo = todoDB.findById(id);
   return todo && todo.user_id === userId ? todo : null;
@@ -78,7 +70,7 @@ export async function GET(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }
@@ -99,7 +91,7 @@ export async function PUT(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }
@@ -218,10 +210,25 @@ export async function PUT(
     input.tag_ids = body.tag_ids;
   }
 
+  const isRecurring = input.is_recurring ?? existing.is_recurring;
+  const recurrencePattern = input.recurrence_pattern !== undefined
+    ? input.recurrence_pattern
+    : existing.recurrence_pattern;
+  const dueDate = input.due_date !== undefined ? input.due_date : existing.due_date;
+  if (isRecurring && dueDate === null) {
+    return errorResponse("Recurring todos require a due date", 400);
+  }
+  if (isRecurring && !isRecurrencePattern(recurrencePattern)) {
+    return errorResponse("Invalid recurrence pattern", 400);
+  }
+  if (!isRecurring) {
+    input.recurrence_pattern = null;
+  }
+
   try {
-    const updated = todoDB.update(id, input);
-    return updated
-      ? NextResponse.json(updated)
+    const result = todoDB.updateAndCreateNextInstance(id, session.userId, input);
+    return result
+      ? NextResponse.json(result)
       : errorResponse("Todo not found", 404);
   } catch (error) {
     if (error instanceof Error && error.message === "Tag not found") {
@@ -240,7 +247,7 @@ export async function DELETE(
     return errorResponse("Not authenticated", 401);
   }
 
-  const id = parseId((await params).id);
+  const id = parsePositiveId((await params).id);
   if (id === null) {
     return errorResponse("Todo not found", 404);
   }

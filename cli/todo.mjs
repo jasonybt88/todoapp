@@ -1,6 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { createTodoClient } from "./client.mjs";
 
+const recurrencePatterns = new Set(["daily", "weekly", "monthly", "yearly"]);
+
 function requiredValue(argumentsList, index, option) {
   const value = argumentsList[index + 1];
   if (!value || value.startsWith("--")) {
@@ -86,9 +88,20 @@ export function parseCommand(argumentsList) {
       } else if (option === "--due-date") {
         input.due_date = requiredValue(options, index, option);
         index += 1;
+      } else if (option === "--repeat") {
+        const pattern = requiredValue(options, index, option);
+        if (!recurrencePatterns.has(pattern)) {
+          throw new Error("--repeat must be daily, weekly, monthly, or yearly.");
+        }
+        input.is_recurring = true;
+        input.recurrence_pattern = pattern;
+        index += 1;
       } else {
         throw new Error(`Unknown option: ${option}`);
       }
+    }
+    if (input.is_recurring && !input.due_date) {
+      throw new Error("Recurring todos require --due-date.");
     }
     return { command, input };
   }
@@ -108,6 +121,17 @@ export function parseCommand(argumentsList) {
         const value = requiredValue(options, index, option);
         input.due_date = value === "none" ? null : value;
         index += 1;
+      } else if (option === "--repeat") {
+        const pattern = requiredValue(options, index, option);
+        if (!recurrencePatterns.has(pattern)) {
+          throw new Error("--repeat must be daily, weekly, monthly, or yearly.");
+        }
+        input.is_recurring = true;
+        input.recurrence_pattern = pattern;
+        index += 1;
+      } else if (option === "--no-repeat") {
+        input.is_recurring = false;
+        input.recurrence_pattern = null;
       } else if (option === "--completed") {
         const value = requiredValue(options, index, option);
         if (value !== "true" && value !== "false") {
@@ -126,7 +150,7 @@ export function parseCommand(argumentsList) {
   }
 
   throw new Error(
-    "Usage: node cli/todo.mjs list | get <id> | create <title> [--priority high|medium|low] [--due-date ISO] | update <id> [--title text] [--priority value] [--due-date ISO|none] [--completed true|false] | delete <id> | tags list | tags create <name> [--color #RRGGBB] | tags update <id> [--name text] [--color #RRGGBB] | tags delete <id> | tags attach <todoId> <tagId> | tags detach <todoId> <tagId>",
+    "Usage: node cli/todo.mjs list | get <id> | create <title> [--priority high|medium|low] [--due-date ISO] [--repeat daily|weekly|monthly|yearly] | update <id> [--title text] [--priority value] [--due-date ISO|none] [--repeat pattern|--no-repeat] [--completed true|false] | delete <id> | tags list | tags create <name> [--color #RRGGBB] | tags update <id> [--name text] [--color #RRGGBB] | tags delete <id> | tags attach <todoId> <tagId> | tags detach <todoId> <tagId>",
   );
 }
 
