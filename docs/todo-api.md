@@ -38,8 +38,16 @@ For race-safe delivery marking, send only `last_notification_sent` and
 `notification_snapshot: { due_date, reminder_minutes }`, using the values
 returned by the check endpoint. The update returns `409` if the reminder was
 changed, completed, or already marked since the check.
+Notification delivery-marking updates return the marked `Todo` directly;
+ordinary updates return the `{ "todo": Todo, "nextInstance"?: Todo }` envelope.
 Subtask completion is independent of its parent. Tag management has a separate
 feature contract.
+
+Set `is_recurring` to `true` with a valid `recurrence_pattern` (`daily`,
+`weekly`, `monthly`, or `yearly`) and a non-null `due_date` to enable recurrence.
+Recurrence dates advance in Singapore local time; monthly and yearly dates clamp
+to the last valid day of the target month. Disabling recurrence clears the
+pattern for that todo and does not change any already-created occurrence.
 
 ## Routes
 
@@ -48,7 +56,7 @@ feature contract.
 | `GET` | `/api/todos` | `200 Todo[]` | Optional `?priority=high|medium|low` |
 | `POST` | `/api/todos` | `201 Todo` | `{ title, due_date?, priority?, is_recurring?, recurrence_pattern?, reminder_minutes?, tag_ids? }` |
 | `GET` | `/api/todos/:id` | `200 Todo` | — |
-| `PUT` | `/api/todos/:id` | `200 Todo` | Any supported fields to update |
+| `PUT`  | `/api/todos/:id` | `200 { "todo": Todo, "nextInstance"?: Todo }` | Any supported fields to update |
 | `DELETE` | `/api/todos/:id` | `200 { "success": true }` | — |
 | `GET` | `/api/holidays` | `200 { "holidays": Holiday[] }` | — |
 | `GET` | `/api/holidays?year=2026&month=12` | `200 { "holidays": Holiday[] }` | Optional `YYYY` and `MM` pair; results include visible adjacent calendar dates |
@@ -72,6 +80,11 @@ checked by the server. Updates may move a due date into the past so the item is
 displayed as overdue. Invalid input returns `400 { "error": "..." }`. A missing
 todo or one owned by another user returns the same
 `404 { "error": "Todo not found" }`.
+
+When `completed` changes from `false` to `true` on a recurring todo, the same
+PUT transaction creates exactly one next instance and returns it as
+`nextInstance`. The new todo inherits the title, priority, recurrence pattern,
+reminder offset, and tags. Other updates return `{ "todo": Todo }`.
 
 SQLite stores booleans as integers and enables foreign keys at connection
 initialization. Deleting a todo therefore cascades to its subtasks and tag links.
