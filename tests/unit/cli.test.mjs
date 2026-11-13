@@ -141,3 +141,85 @@ test("CLI recurrence options validate patterns and disable recurrence explicitly
     },
   );
 });
+
+test("CLI template commands validate fields and preserve ordered subtasks", () => {
+  assert.deepEqual(
+    parseCommand([
+      "template",
+      "create",
+      "Weekly review",
+      "--title",
+      "Review project",
+      "--priority",
+      "high",
+      "--due-offset-minutes",
+      "10080",
+      "--repeat",
+      "weekly",
+      "--subtask",
+      "Check milestones",
+      "--subtask",
+      "Assign owners",
+    ]),
+    {
+      command: "template",
+      action: "create",
+      input: {
+        name: "Weekly review",
+        title_template: "Review project",
+        priority: "high",
+        due_date_offset_minutes: 10080,
+        is_recurring: true,
+        recurrence_pattern: "weekly",
+        subtasks: [
+          { title: "Check milestones", position: 0 },
+          { title: "Assign owners", position: 1 },
+        ],
+      },
+    },
+  );
+  assert.deepEqual(
+    parseCommand(["template", "update", "12", "--no-repeat", "--clear-subtasks"]),
+    {
+      command: "template",
+      action: "update",
+      id: 12,
+      input: { is_recurring: false, recurrence_pattern: null, subtasks: [] },
+    },
+  );
+  assert.throws(
+    () => parseCommand(["template", "create", "Review", "--title", "Review", "--repeat", "fortnightly"]),
+    /must be daily, weekly, monthly, or yearly/,
+  );
+  assert.throws(
+    () => parseCommand(["template", "update", "12", "--due-offset-minutes", "0"]),
+    /positive safe integer/,
+  );
+});
+
+test("CLI template client uses the shared authenticated API routes", async () => {
+  const requests = [];
+  const client = createTodoClient({
+    baseUrl: "https://todo.example",
+    sessionToken: "session-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
+      return new Response(JSON.stringify({ id: 7 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  await client.createTemplate({ name: "Review", title_template: "Review" });
+  await client.useTemplate(7);
+  assert.equal(requests[0].url, "https://todo.example/api/templates");
+  assert.equal(requests[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(requests[0].options.body), {
+    name: "Review",
+    title_template: "Review",
+  });
+  assert.equal(requests[0].options.headers.Cookie, "auth_session=session-token");
+  assert.equal(requests[1].url, "https://todo.example/api/templates/7/use");
+  assert.equal(requests[1].options.method, "POST");
+});

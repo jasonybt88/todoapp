@@ -7,14 +7,26 @@ import type {
   Priority,
   RecurrencePattern,
   Subtask,
+  Template,
   Todo,
   UpdateTodoInput,
 } from "@/lib/db";
 import { SubtaskList, type SubtaskOperations } from "@/components/SubtaskList";
+import {
+  SaveTemplateModal,
+  TemplateManagerModal,
+  templateDraftFromTemplate,
+  type TemplateDraft,
+} from "@/components/TemplateModals";
 import { requestJson } from "@/lib/client-http";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { isReminderMinutes, REMINDER_OPTIONS } from "@/lib/reminders";
-import { formatSingaporeDate, formatSingaporeDateTimeInput, getSingaporeNow } from "@/lib/timezone";
+import {
+  formatSingaporeDate,
+  formatSingaporeDateTimeInput,
+  getSingaporeNow,
+  parseSingaporeDateTime,
+} from "@/lib/timezone";
 import { sectionTodos, validateDueDate, validateTodoTitle } from "@/lib/todo";
 
 interface TodoDashboardProps {
@@ -92,6 +104,7 @@ function TodoRow({
   onToggle,
   onEdit,
   onDelete,
+  onSaveTemplate,
   onSubtasksChange,
   onError,
   operations,
@@ -102,6 +115,7 @@ function TodoRow({
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onSaveTemplate: (todo: Todo) => void;
   onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
   onError: (message: string | null) => void;
   operations: SubtaskOperations;
@@ -146,6 +160,9 @@ function TodoRow({
         <button type="button" onClick={() => onEdit(todo)} aria-label={`Edit ${todo.title}`}>
           Edit
         </button>
+        <button type="button" onClick={() => onSaveTemplate(todo)} aria-label={`Save ${todo.title} as template`}>
+          Save as template
+        </button>
         <button
           className="delete-button"
           type="button"
@@ -164,6 +181,7 @@ function TodoRow({
 
 export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [todos, setTodos] = useState<Todo[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [title, setTitle] = useState("");
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
@@ -187,6 +205,11 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
   const [now, setNow] = useState(getSingaporeNow);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState<TemplateDraft | null>(null);
+  const [templateBeingEdited, setTemplateBeingEdited] = useState<Template | null>(null);
+  const [busyTemplateId, setBusyTemplateId] = useState<number | null>(null);
   const notifications = useNotifications();
 
   useEffect(() => {
@@ -207,6 +230,26 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
       })
       .finally(() => {
         if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    requestJson<Template[]>("/api/templates")
+      .then((result) => {
+        if (active) setTemplates(result);
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setError(cause instanceof Error ? cause.message : "Templates could not be loaded.");
+        }
+      })
+      .finally(() => {
+        if (active) setTemplatesLoading(false);
       });
 
     return () => {
@@ -254,6 +297,84 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
 
   function nextTemporaryId() {
     return nextSubtaskId.current--;
+  }
+
+  function templateDraftFromTodo(todo?: Todo): TemplateDraft {
+    const sourceTitle = todo?.title ?? title.trim();
+    const dueDateValue = todo
+      ? todo.due_date
+      : dueDate
+        ? parseSingaporeDateTime(dueDate)?.toISOString() ?? null
+        : null;
+    const dueOffset = dueDateValue
+      ? Math.ceil((new Date(dueDateValue).getTime() - Date.now()) / 60_000)
+      : null;
+    return {
+      name: sourceTitle,
+      description: "",
+      category: "",
+      title: sourceTitle,
+      priority: todo?.priority ?? priority,
+      isRecurring: todo?.is_recurring ?? isRecurring,
+      recurrencePattern: todo?.recurrence_pattern ?? recurrencePattern,
+      reminderMinutes: todo ? todo.reminder_minutes : reminderMinutes,
+      dueDateOffsetMinutes: dueOffset !== null && dueOffset > 0 ? String(dueOffset) : "",
+      subtasks: todo?.subtasks.map((subtask, position) => ({
+        title: subtask.title,
+        position,
+      })) ?? [],
+    };
+  }
+
+  function startSavingTemplate(todo?: Todo) {
+    setTemplateBeingEdited(null);
+    setTemplateDraft(templateDraftFromTodo(todo));
+  }
+
+  function startEditingTemplate(template: Template) {
+    setTemplateManagerOpen(false);
+    setTemplateBeingEdited(template);
+    setTemplateDraft(templateDraftFromTemplate(template));
+  }
+
+  function handleTemplateSaved(template: Template) {
+    setTemplates((current) => [
+      template,
+      ...current.filter((item) => item.id !== template.id),
+    ]);
+  }
+
+  async function applyTemplate(templateId: number) {
+    setError(null);
+    setBusyTemplateId(templateId);
+    try {
+      const todo = await requestJson<Todo>(`/api/templates/${templateId}/use`, {
+        method: "POST",
+      });
+      setTodos((current) => [todo, ...current]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The template could not be used.");
+    } finally {
+      setBusyTemplateId(null);
+    }
+  }
+
+  async function deleteTemplate(template: Template) {
+    if (!window.confirm(`Delete template "${template.name}"?`)) {
+      return;
+    }
+    setError(null);
+    setBusyTemplateId(template.id);
+    try {
+      await requestJson<{ success: boolean }>(`/api/templates/${template.id}`, {
+        method: "DELETE",
+      });
+      setTemplates((current) => current.filter((item) => item.id !== template.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The template could not be deleted.");
+    } finally {
+      setBusyTemplateId(null);
+    }
   }
 
   async function addTodo(event: React.FormEvent<HTMLFormElement>) {
@@ -445,6 +566,33 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           <Link className="calendar-list-link" href="/calendar">
             Calendar
           </Link>
+          <label className="visually-hidden" htmlFor="quick-template">Use a template</label>
+          <select
+            id="quick-template"
+            className="template-quick-select"
+            value=""
+            disabled={templatesLoading || templates.length === 0 || busyTemplateId !== null}
+            onChange={(event) => {
+              const templateId = Number(event.target.value);
+              if (templateId > 0) void applyTemplate(templateId);
+            }}
+          >
+            <option value="">
+              {templatesLoading ? "Loading templates..." : "Use a template"}
+            </option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.category ? `${template.category}: ` : ""}{template.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => setTemplateManagerOpen(true)}
+          >
+            Manage templates
+          </button>
           <span className="muted">{todos.length} total</span>
           <button
             className={notifications.permission === "granted" ? "notifications-on" : "notifications-enable"}
@@ -511,9 +659,19 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
             setReminderMinutes(value);
           }}
         />
-        <button className="primary-button" type="submit" disabled={loading}>
-          Add
-        </button>
+        <div className="todo-form-actions">
+          <button className="primary-button" type="submit" disabled={loading}>
+            Add
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!title.trim()}
+            onClick={() => startSavingTemplate()}
+          >
+            Save as template
+          </button>
+        </div>
         <div className="recurrence-fields">
           <label>
             <input
@@ -577,9 +735,9 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
         <p className="muted" role="status">Loading todos...</p>
       ) : (
         <div className="todo-sections">
-          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
-          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
-          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
+          <TodoSection title="Overdue" todos={sections.overdue} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSaveTemplate={startSavingTemplate} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
+          <TodoSection title="Pending" todos={sections.pending} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSaveTemplate={startSavingTemplate} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
+          <TodoSection title="Completed" todos={sections.completed} onToggle={toggleTodo} onEdit={startEditing} onDelete={deleteTodo} onSaveTemplate={startSavingTemplate} onSubtasksChange={updateSubtasks} onError={setError} operations={subtaskOperations} isTodoActive={isTodoActive} nextTemporaryId={nextTemporaryId} />
         </div>
       )}
 
@@ -698,6 +856,28 @@ export function TodoDashboard({ userId }: TodoDashboardProps) {
           </section>
         </div>
       )}
+      {templateManagerOpen && (
+        <TemplateManagerModal
+          templates={templates}
+          busyId={busyTemplateId}
+          onClose={() => setTemplateManagerOpen(false)}
+          onEdit={startEditingTemplate}
+          onUse={(template) => void applyTemplate(template.id)}
+          onDelete={(template) => void deleteTemplate(template)}
+        />
+      )}
+      {templateDraft && (
+        <SaveTemplateModal
+          key={templateBeingEdited?.id ?? "new-template"}
+          initialDraft={templateDraft}
+          template={templateBeingEdited ?? undefined}
+          onClose={() => {
+            setTemplateDraft(null);
+            setTemplateBeingEdited(null);
+          }}
+          onSaved={handleTemplateSaved}
+        />
+      )}
     </section>
   );
 }
@@ -708,6 +888,7 @@ function TodoSection({
   onToggle,
   onEdit,
   onDelete,
+  onSaveTemplate,
   onSubtasksChange,
   onError,
   operations,
@@ -719,6 +900,7 @@ function TodoSection({
   onToggle: (id: number, completed: boolean) => void;
   onEdit: (todo: Todo) => void;
   onDelete: (todo: Todo) => void;
+  onSaveTemplate: (todo: Todo) => void;
   onSubtasksChange: (id: number, update: (subtasks: Subtask[]) => Subtask[]) => void;
   onError: (message: string | null) => void;
   operations: SubtaskOperations;
@@ -740,6 +922,7 @@ function TodoSection({
               onToggle={onToggle}
               onEdit={onEdit}
               onDelete={onDelete}
+              onSaveTemplate={onSaveTemplate}
               onSubtasksChange={onSubtasksChange}
               onError={onError}
               operations={operations}

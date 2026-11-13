@@ -169,7 +169,9 @@ button:disabled {
 
 .todo-heading-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 1rem;
 }
 
@@ -448,6 +450,22 @@ button:disabled {
   grid-template-columns: minmax(10rem, 1fr) 7rem 12rem 11rem auto;
   gap: 0.6rem;
   margin: 1rem 0 1.25rem;
+}
+
+.todo-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.template-quick-select {
+  min-width: 9rem;
+  min-height: 2.5rem;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  background: white;
+  padding: 0.55rem 0.75rem;
+  color: #172033;
 }
 
 .recurrence-fields {
@@ -791,15 +809,120 @@ button:disabled {
   margin: 0 0 1rem;
 }
 
+.template-dialog {
+  width: min(100%, 42rem);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
 .edit-form {
   display: grid;
   gap: 0.6rem;
+}
+
+.edit-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+  border: 1px solid #cbd3e1;
+  border-radius: 0.55rem;
+  background: white;
+  padding: 0.65rem 0.75rem;
+  color: #172033;
+  font: inherit;
 }
 
 .edit-form label {
   margin-top: 0.35rem;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.template-hint {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.template-checkbox,
+.template-checkbox input {
+  width: fit-content;
+}
+
+.template-checklist {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.template-checklist h3,
+.template-card h3 {
+  margin: 0;
+}
+
+.template-subtask-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.template-modal-heading,
+.template-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.template-modal-heading h2 {
+  margin: 0;
+}
+
+.template-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-card {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid #e0e5ef;
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+}
+
+.template-card-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.template-category,
+.template-card-details {
+  color: #657187;
+  font-size: 0.85rem;
+}
+
+.template-card-details,
+.template-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.template-card-actions {
+  justify-content: flex-end;
+  margin-top: 0.2rem;
+}
+
+.template-card-actions .delete-button {
+  min-height: 2.8rem;
+  border: 0;
+  background: transparent;
+  padding: 0.5rem 0.75rem;
+  color: #a5342e;
+  font-weight: 700;
 }
 
 .edit-actions {
@@ -830,6 +953,14 @@ button:disabled {
     grid-column: 1 / -1;
   }
 
+  .todo-form-actions {
+    grid-column: 1 / -1;
+  }
+
+  .todo-heading-actions {
+    gap: 0.5rem;
+  }
+
   .calendar-card {
     padding: 0.6rem;
   }
@@ -854,7 +985,12 @@ button:disabled {
 
   .todo-meta {
     align-self: stretch;
+    flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .template-quick-select {
+    min-width: 8rem;
   }
 
   .calendar-shell {
@@ -922,9 +1058,11 @@ button:disabled {
   .auth-form input,
   .todo-form input,
   .todo-form select,
+  .template-quick-select,
   .todo-filters select,
   .edit-form input,
-  .edit-form select {
+  .edit-form select,
+  .edit-form textarea {
     border-color: #475569;
     background: #0f172a;
     color: #e2e8f0;
@@ -954,6 +1092,10 @@ button:disabled {
     border-color: #475569;
     background: #1e293b;
     color: #e2e8f0;
+  }
+
+  .template-card {
+    border-color: #334155;
   }
 
   .recurrence-badge {

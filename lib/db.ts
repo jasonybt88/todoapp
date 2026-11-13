@@ -4,6 +4,10 @@ import { dirname, resolve } from "node:path";
 import { getCalendarVisibleRange } from "@/lib/calendar";
 import { SINGAPORE_PUBLIC_HOLIDAYS, type HolidaySeed } from "@/lib/singapore-holidays";
 import type { Priority } from "@/lib/priority";
+import {
+  parseTemplateSubtasks,
+  resolveTemplateDueDate,
+} from "@/lib/template-utils";
 
 export {
   PRIORITY_ORDER,
@@ -69,6 +73,55 @@ export interface Todo {
   subtasks: Subtask[];
   tags: Tag[];
 }
+
+export interface TemplateSubtask {
+  title: string;
+  position: number;
+}
+
+export interface Template {
+  id: number;
+  user_id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  title_template: string;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  due_date_offset_minutes: number | null;
+  subtasks_json: string | null;
+  created_at: string;
+}
+
+export interface CreateTemplateDto {
+  name: string;
+  description?: string;
+  category?: string;
+  title_template: string;
+  priority?: Priority;
+  is_recurring?: boolean;
+  recurrence_pattern?: RecurrencePattern | null;
+  reminder_minutes?: number | null;
+  due_date_offset_minutes?: number | null;
+  subtasks?: TemplateSubtask[];
+}
+
+export interface CreateTemplateInput {
+  name: string;
+  description: string | null;
+  category: string | null;
+  title_template: string;
+  priority: Priority;
+  is_recurring: boolean;
+  recurrence_pattern: RecurrencePattern | null;
+  reminder_minutes: number | null;
+  due_date_offset_minutes: number | null;
+  subtasks_json: string | null;
+}
+
+export type UpdateTemplateInput = Partial<CreateTemplateInput>;
 
 export interface CreateTodoInput {
   title: string;
@@ -171,6 +224,23 @@ function createDatabase(): Database.Database {
       PRIMARY KEY (todo_id, tag_id)
     );
     CREATE INDEX IF NOT EXISTS idx_todo_tags_tag_id ON todo_tags(tag_id);
+
+    CREATE TABLE IF NOT EXISTS templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      category TEXT,
+      title_template TEXT NOT NULL,
+      priority TEXT NOT NULL DEFAULT 'medium',
+      is_recurring INTEGER NOT NULL DEFAULT 0,
+      recurrence_pattern TEXT,
+      reminder_minutes INTEGER,
+      due_date_offset_minutes INTEGER,
+      subtasks_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_templates_user_id ON templates(user_id);
 
     CREATE TABLE IF NOT EXISTS holidays (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -728,6 +798,195 @@ export const subtaskDB = {
       `DELETE FROM subtasks WHERE id = ?
        AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
     ).run(id, userId).changes === 1;
+  },
+};
+
+interface TemplateRow extends Omit<Template, "is_recurring"> {
+  is_recurring: number;
+}
+
+function mapTemplate(row: TemplateRow): Template {
+  return { ...row, is_recurring: Boolean(row.is_recurring) };
+}
+
+function findTemplateByIdForUser(id: number, userId: number): Template | null {
+  const row = getDatabase()
+    .prepare(
+      `SELECT id, user_id, name, description, category, title_template, priority,
+              is_recurring, recurrence_pattern, reminder_minutes,
+              due_date_offset_minutes, subtasks_json, created_at
+       FROM templates WHERE id = ? AND user_id = ?`,
+    )
+    .get(id, userId) as TemplateRow | undefined;
+  return row ? mapTemplate(row) : null;
+}
+
+export const templateDB = {
+  findAllByUser(userId: number): Template[] {
+    const rows = getDatabase()
+      .prepare(
+        `SELECT id, user_id, name, description, category, title_template, priority,
+                is_recurring, recurrence_pattern, reminder_minutes,
+                due_date_offset_minutes, subtasks_json, created_at
+         FROM templates WHERE user_id = ? ORDER BY created_at DESC, id DESC`,
+      )
+      .all(userId) as TemplateRow[];
+    return rows.map(mapTemplate);
+  },
+
+  findByIdForUser(id: number, userId: number): Template | null {
+    return findTemplateByIdForUser(id, userId);
+  },
+
+  createForUser(userId: number, input: CreateTemplateInput): Template {
+    const result = getDatabase()
+      .prepare(
+        `INSERT INTO templates
+          (user_id, name, description, category, title_template, priority,
+           is_recurring, recurrence_pattern, reminder_minutes,
+           due_date_offset_minutes, subtasks_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        userId,
+        input.name,
+        input.description,
+        input.category,
+        input.title_template,
+        input.priority,
+        input.is_recurring ? 1 : 0,
+        input.recurrence_pattern,
+        input.reminder_minutes,
+        input.due_date_offset_minutes,
+        input.subtasks_json,
+      );
+    const template = findTemplateByIdForUser(Number(result.lastInsertRowid), userId);
+    if (!template) {
+      throw new Error("Newly created template could not be loaded");
+    }
+    return template;
+  },
+
+  updateForUser(
+    id: number,
+    userId: number,
+    input: UpdateTemplateInput,
+  ): Template | null {
+    const fields: string[] = [];
+    const values: Array<string | number | null> = [];
+    if (input.name !== undefined) {
+      fields.push("name = ?");
+      values.push(input.name);
+    }
+    if (input.description !== undefined) {
+      fields.push("description = ?");
+      values.push(input.description);
+    }
+    if (input.category !== undefined) {
+      fields.push("category = ?");
+      values.push(input.category);
+    }
+    if (input.title_template !== undefined) {
+      fields.push("title_template = ?");
+      values.push(input.title_template);
+    }
+    if (input.priority !== undefined) {
+      fields.push("priority = ?");
+      values.push(input.priority);
+    }
+    if (input.is_recurring !== undefined) {
+      fields.push("is_recurring = ?");
+      values.push(input.is_recurring ? 1 : 0);
+    }
+    if (input.recurrence_pattern !== undefined) {
+      fields.push("recurrence_pattern = ?");
+      values.push(input.recurrence_pattern);
+    }
+    if (input.reminder_minutes !== undefined) {
+      fields.push("reminder_minutes = ?");
+      values.push(input.reminder_minutes);
+    }
+    if (input.due_date_offset_minutes !== undefined) {
+      fields.push("due_date_offset_minutes = ?");
+      values.push(input.due_date_offset_minutes);
+    }
+    if (input.subtasks_json !== undefined) {
+      fields.push("subtasks_json = ?");
+      values.push(input.subtasks_json);
+    }
+    if (fields.length === 0) {
+      return findTemplateByIdForUser(id, userId);
+    }
+
+    const result = getDatabase()
+      .prepare(`UPDATE templates SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
+      .run(...values, id, userId);
+    return result.changes ? findTemplateByIdForUser(id, userId) : null;
+  },
+
+  deleteForUser(id: number, userId: number): boolean {
+    return getDatabase()
+      .prepare("DELETE FROM templates WHERE id = ? AND user_id = ?")
+      .run(id, userId).changes === 1;
+  },
+
+  createTodoFromTemplate(
+    id: number,
+    userId: number,
+    now: Date,
+  ): Todo | null {
+    const db = getDatabase();
+    const create = db.transaction(() => {
+      const template = findTemplateByIdForUser(id, userId);
+      if (!template) {
+        return null;
+      }
+
+      const dueDate = resolveTemplateDueDate(
+        template.due_date_offset_minutes,
+        now,
+      );
+      if (template.due_date_offset_minutes !== null && dueDate === null) {
+        throw new Error("Template due date offset is invalid");
+      }
+      if (template.reminder_minutes !== null && dueDate === null) {
+        throw new Error("Templates with reminders require a due date");
+      }
+      if (
+        template.is_recurring &&
+        (!dueDate ||
+          !template.recurrence_pattern ||
+          !["daily", "weekly", "monthly", "yearly"].includes(template.recurrence_pattern))
+      ) {
+        throw new Error("Recurring templates require a due date and valid pattern");
+      }
+
+      const todo = todoDB.create(userId, {
+        title: template.title_template,
+        due_date: dueDate,
+        priority: template.priority,
+        is_recurring: template.is_recurring,
+        recurrence_pattern: template.is_recurring
+          ? template.recurrence_pattern
+          : null,
+        reminder_minutes: template.reminder_minutes,
+      });
+
+      const insertSubtask = db.prepare(
+        "INSERT INTO subtasks (todo_id, title, position) VALUES (?, ?, ?)",
+      );
+      for (const subtask of parseTemplateSubtasks(template.subtasks_json)) {
+        insertSubtask.run(todo.id, subtask.title, subtask.position);
+      }
+
+      const created = findTodoWithRelations(todo.id);
+      if (!created) {
+        throw new Error("New todo created from template could not be loaded");
+      }
+      return created;
+    });
+
+    return create.immediate();
   },
 };
 

@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 import { createTodoClient } from "./client.mjs";
 
 const recurrencePatterns = new Set(["daily", "weekly", "monthly", "yearly"]);
+const priorities = new Set(["high", "medium", "low"]);
+const reminderPresets = new Set([15, 30, 60, 120, 1440, 2880, 10080]);
 
 function requiredValue(argumentsList, index, option) {
   const value = argumentsList[index + 1];
@@ -11,9 +13,117 @@ function requiredValue(argumentsList, index, option) {
   return value;
 }
 
+function positiveInteger(value, option) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${option} must be a positive safe integer.`);
+  }
+  return parsed;
+}
+
+function parseTemplateCommand(args) {
+  const [action, ...rest] = args;
+  if (action === "list" && rest.length === 0) {
+    return { command: "template", action };
+  }
+  if (action === "use" && rest.length === 1) {
+    return { command: "template", action, id: positiveInteger(rest[0], "Template ID") };
+  }
+  if (action === "delete" && rest.length === 1) {
+    return { command: "template", action, id: positiveInteger(rest[0], "Template ID") };
+  }
+
+  const isCreate = action === "create";
+  if ((isCreate || action === "update") && rest.length > (isCreate ? 0 : 1)) {
+    const id = isCreate ? undefined : positiveInteger(rest[0], "Template ID");
+    const name = isCreate ? rest[0] : undefined;
+    const options = rest.slice(1);
+    const input = {};
+    if (isCreate) input.name = name;
+    let hasTitle = false;
+    const subtasks = [];
+
+    for (let index = 0; index < options.length; index += 1) {
+      const option = options[index];
+      if (option === "--title") {
+        input.title_template = requiredValue(options, index, option);
+        hasTitle = true;
+        index += 1;
+      } else if (option === "--name" && !isCreate) {
+        input.name = requiredValue(options, index, option);
+        index += 1;
+      } else if (option === "--description" || option === "--category") {
+        const value = requiredValue(options, index, option);
+        input[option.slice(2)] = value === "none" ? null : value;
+        index += 1;
+      } else if (option === "--priority") {
+        const value = requiredValue(options, index, option);
+        if (!priorities.has(value)) {
+          throw new Error("--priority must be high, medium, or low.");
+        }
+        input.priority = value;
+        index += 1;
+      } else if (option === "--due-offset-minutes") {
+        const value = requiredValue(options, index, option);
+        input.due_date_offset_minutes = value === "none"
+          ? null
+          : positiveInteger(value, option);
+        index += 1;
+      } else if (option === "--reminder-minutes") {
+        const value = requiredValue(options, index, option);
+        const minutes = value === "none" ? null : positiveInteger(value, option);
+        if (minutes !== null && !reminderPresets.has(minutes)) {
+          throw new Error("--reminder-minutes must be a supported preset or none.");
+        }
+        input.reminder_minutes = minutes;
+        index += 1;
+      } else if (option === "--repeat") {
+        const pattern = requiredValue(options, index, option);
+        if (!recurrencePatterns.has(pattern)) {
+          throw new Error("--repeat must be daily, weekly, monthly, or yearly.");
+        }
+        input.is_recurring = true;
+        input.recurrence_pattern = pattern;
+        index += 1;
+      } else if (option === "--no-repeat" && !isCreate) {
+        input.is_recurring = false;
+        input.recurrence_pattern = null;
+      } else if (option === "--subtask") {
+        subtasks.push({
+          title: requiredValue(options, index, option),
+          position: subtasks.length,
+        });
+        index += 1;
+      } else if (option === "--clear-subtasks" && !isCreate) {
+        input.subtasks = [];
+      } else {
+        throw new Error(`Unknown template option: ${option}`);
+      }
+    }
+
+    if (subtasks.length > 0) input.subtasks = subtasks;
+    if (isCreate && !hasTitle) {
+      throw new Error("template create requires --title.");
+    }
+    if (!isCreate && Object.keys(input).length === 0) {
+      throw new Error("Provide at least one template field to update.");
+    }
+    return isCreate
+      ? { command: "template", action, input }
+      : { command: "template", action, id, input };
+  }
+
+  throw new Error(
+    "Template usage: template list | template create <name> --title <title> [--description text] [--category text] [--priority high|medium|low] [--due-offset-minutes n|none] [--reminder-minutes preset|none] [--repeat pattern] [--subtask title] | template update <id> [template options] | template use <id> | template delete <id>",
+  );
+}
+
 export function parseCommand(argumentsList) {
   const [command, ...args] = argumentsList;
 
+  if (command === "template") {
+    return parseTemplateCommand(args);
+  }
   if (command === "list" && args.length === 0) {
     return { command };
   }
@@ -113,6 +223,21 @@ export async function executeCommand(parsed, client) {
       return client.update(parsed.id, parsed.input);
     case "delete":
       return client.delete(parsed.id);
+    case "template":
+      switch (parsed.action) {
+        case "list":
+          return client.listTemplates();
+        case "create":
+          return client.createTemplate(parsed.input);
+        case "update":
+          return client.updateTemplate(parsed.id, parsed.input);
+        case "use":
+          return client.useTemplate(parsed.id);
+        case "delete":
+          return client.deleteTemplate(parsed.id);
+        default:
+          throw new Error("Unknown template command.");
+      }
     default:
       throw new Error("Unknown command.");
   }

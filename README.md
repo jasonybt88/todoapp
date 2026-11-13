@@ -70,10 +70,20 @@ npm run todo -- update 12 --priority low
 npm run todo -- update 12 --completed true
 npm run todo -- update 12 --no-repeat
 npm run todo -- delete 12
+npm run todo -- template list
+npm run todo -- template create "Weekly review" --title "Review project" --priority high --due-offset-minutes 10080 --repeat weekly --subtask "Check milestones"
+npm run todo -- template use 3
+npm run todo -- template update 3 --category Work
+npm run todo -- template delete 3
 ```
 
 Recurring todos require a due date and one of `daily`, `weekly`, `monthly`, or
 `yearly`. Completing one creates its next occurrence.
+Template commands use the same authenticated API. Template creation supports
+`--description`, `--category`, `--priority`, `--due-offset-minutes`,
+`--reminder-minutes`, `--repeat`, and repeatable `--subtask` options. Use
+`none` to clear optional description, category, due offset, or reminder values;
+`template update` also accepts `--no-repeat` and `--clear-subtasks`.
 
 ## Checks and release
 

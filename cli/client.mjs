@@ -11,9 +11,18 @@ export function createTodoClient({
   }
 
   const apiUrl = new URL("/api/todos", baseUrl);
+  const templatesUrl = new URL("/api/templates", baseUrl);
 
   function todoUrl(id) {
     return new URL(`${apiUrl.pathname}/${encodeURIComponent(id)}`, apiUrl.origin);
+  }
+
+  function templateUrl(id, action) {
+    const suffix = action ? `/${action}` : "";
+    return new URL(
+      `${templatesUrl.pathname}/${encodeURIComponent(id)}${suffix}`,
+      templatesUrl.origin,
+    );
   }
 
   async function request(url, { method = "GET", body } = {}) {
@@ -54,6 +63,21 @@ export function createTodoClient({
       return request(todoUrl(id), {
         method: "DELETE",
       });
+    },
+    listTemplates() {
+      return request(templatesUrl);
+    },
+    createTemplate(input) {
+      return request(templatesUrl, { method: "POST", body: input });
+    },
+    updateTemplate(id, input) {
+      return request(templateUrl(id), { method: "PUT", body: input });
+    },
+    deleteTemplate(id) {
+      return request(templateUrl(id), { method: "DELETE" });
+    },
+    useTemplate(id) {
+      return request(templateUrl(id, "use"), { method: "POST" });
     },
   };
 }

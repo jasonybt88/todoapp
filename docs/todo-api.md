@@ -64,6 +64,27 @@ pattern for that todo and does not change any already-created occurrence.
 | `POST` | `/api/todos/:id/subtasks` | `201 Subtask` | `{ title }` |
 | `PUT` | `/api/subtasks/:id` | `200 Subtask` | `{ title?, completed? }` |
 | `DELETE` | `/api/subtasks/:id` | `200 { "success": true }` | — |
+| `GET` | `/api/templates` | `200 Template[]` | — |
+| `POST` | `/api/templates` | `201 Template` | `{ name, title_template, description?, category?, priority?, is_recurring?, recurrence_pattern?, reminder_minutes?, due_date_offset_minutes?, subtasks? }` |
+| `PUT` | `/api/templates/:id` | `200 Template` | Any supported template fields |
+| `DELETE` | `/api/templates/:id` | `200 { "success": true }` | — |
+| `POST` | `/api/templates/:id/use` | `201 Todo` | — |
+
+Templates are scoped to the authenticated user. Their name and todo title are
+required; description and category are optional. Priority defaults to `medium`.
+`due_date_offset_minutes` is either `null` or a positive safe integer. A
+recurring template must include a valid recurrence pattern and a due-date
+offset, and a reminder requires an offset as well. The offset is measured in
+minutes from the time the template is used.
+
+The optional `subtasks` array contains `{ "title": string, "position": number }`
+items. Templates save only the ordered checklist titles, not completion state.
+Using a template creates a new todo and fresh incomplete subtasks in one
+transaction. The new todo inherits its title, priority, recurrence, reminder,
+and receives a due date computed from the offset; it does not inherit tags or
+any concrete due date from the original todo. Deleting a template does not
+delete todos already created from it. Invalid or malformed stored checklist
+JSON is treated as an empty checklist.
 
 Holiday records are global and read-only through the API. The calendar database
 seeds Singapore public holidays for 2025–2027 when initialized; the seed command

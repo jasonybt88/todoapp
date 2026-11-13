@@ -160,6 +160,62 @@ describe("subtask persistence", () => {
   });
 });
 
+describe("template persistence", () => {
+  it("scopes template CRUD and atomically copies recurring fields and ordered subtasks", () => {
+    const owner = createUser("template-owner");
+    const other = createUser("template-other");
+    const template = database.templateDB.createForUser(owner.id, {
+      name: "Weekly review",
+      description: null,
+      category: "Work",
+      title_template: "Review project",
+      priority: "high",
+      is_recurring: true,
+      recurrence_pattern: "weekly",
+      reminder_minutes: 30,
+      due_date_offset_minutes: 90,
+      subtasks_json: JSON.stringify([
+        { title: "Check milestones", position: 0 },
+        { title: "Assign owners", position: 2 },
+      ]),
+    });
+
+    expect(template.is_recurring).toBe(true);
+    expect(database.templateDB.findByIdForUser(template.id, other.id)).toBeNull();
+    expect(database.templateDB.updateForUser(template.id, other.id, { name: "Changed" }))
+      .toBeNull();
+    expect(database.templateDB.deleteForUser(template.id, other.id)).toBe(false);
+
+    const todo = database.templateDB.createTodoFromTemplate(
+      template.id,
+      owner.id,
+      new Date("2026-03-01T10:00:00.000Z"),
+    );
+    expect(todo).toMatchObject({
+      user_id: owner.id,
+      title: "Review project",
+      priority: "high",
+      due_date: "2026-03-01T11:30:00.000Z",
+      is_recurring: true,
+      recurrence_pattern: "weekly",
+      reminder_minutes: 30,
+      subtasks: [
+        { title: "Check milestones", completed: false, position: 0 },
+        { title: "Assign owners", completed: false, position: 2 },
+      ],
+      tags: [],
+    });
+
+    expect(database.templateDB.updateForUser(template.id, owner.id, {
+      description: "Updated",
+      is_recurring: false,
+      recurrence_pattern: null,
+    })).toMatchObject({ description: "Updated", is_recurring: false });
+    expect(database.templateDB.deleteForUser(template.id, owner.id)).toBe(true);
+    expect(database.todoDB.findById(todo?.id ?? -1)).not.toBeNull();
+  });
+});
+
 describe("reminder persistence", () => {
   it("finds each preset at its exact Singapore date boundary, including overdue reminders", () => {
     const due = new Date("2026-03-01T16:00:00.000Z");
