@@ -25,6 +25,7 @@ describe("todo persistence", () => {
     const firstTodo = database.todoDB.create(firstUser.id, {
       title: "  Buy groceries  ",
     });
+
     database.todoDB.create(secondUser.id, { title: "Private todo" });
 
     expect(firstTodo).toMatchObject({
@@ -59,5 +60,51 @@ describe("todo persistence", () => {
     expect(database.todoDB.findById(todo.id)).toBeNull();
     expect(database.subtaskDB.findByTodoId(todo.id)).toEqual([]);
     expect(database.subtaskDB.findByTodoId(subtask.todo_id)).toEqual([]);
+  });
+});
+
+describe("reminder persistence", () => {
+  it("finds each preset at its exact Singapore date boundary, including overdue reminders", () => {
+    const due = new Date("2026-03-01T16:00:00.000Z");
+    for (const minutes of [15, 30, 60, 120, 1440, 2880, 10080]) {
+      const owner = createUser(`reminder-${minutes}`);
+      const todo = database.todoDB.create(owner.id, {
+        title: `Reminder ${minutes}`,
+        due_date: due.toISOString(),
+        reminder_minutes: minutes,
+      });
+      const boundary = due.getTime() - minutes * 60_000;
+      expect(database.todoDB.findDueReminders(owner.id, new Date(boundary - 1))).toEqual([]);
+      expect(database.todoDB.findDueReminders(owner.id, new Date(boundary)).map((item) => item.id))
+        .toEqual([todo.id]);
+      expect(database.todoDB.findDueReminders(owner.id, new Date(due.getTime() + 86400_000)).map((item) => item.id))
+        .toEqual([todo.id]);
+    }
+  });
+
+  it("scopes, suppresses and re-arms notifications only when reminder settings change", () => {
+    const owner = createUser("reminder-owner");
+    const other = createUser("reminder-other");
+    const due = "2026-03-01T16:00:00.000Z";
+    const now = new Date("2026-03-01T15:50:00.000Z");
+    const todo = database.todoDB.create(owner.id, {
+      title: "Due soon",
+      due_date: due,
+      reminder_minutes: 15,
+    });
+    expect(database.todoDB.findDueReminders(other.id, now)).toEqual([]);
+    database.todoDB.update(todo.id, { completed: true });
+    expect(database.todoDB.findDueReminders(owner.id, now)).toEqual([]);
+    database.todoDB.update(todo.id, { completed: false });
+    database.todoDB.update(todo.id, { last_notification_sent: now.toISOString() });
+    expect(database.todoDB.findDueReminders(owner.id, now)).toEqual([]);
+    expect(database.todoDB.update(todo.id, { title: "Renamed", due_date: due })?.last_notification_sent)
+      .toBe(now.toISOString());
+    expect(database.todoDB.update(todo.id, { reminder_minutes: 30 })?.last_notification_sent)
+      .toBeNull();
+    expect(database.todoDB.findDueReminders(owner.id, now).map((item) => item.id)).toEqual([todo.id]);
+    database.todoDB.update(todo.id, { last_notification_sent: now.toISOString() });
+    expect(database.todoDB.update(todo.id, { due_date: "2026-03-01T16:10:00.000Z" })?.last_notification_sent)
+      .toBeNull();
   });
 });

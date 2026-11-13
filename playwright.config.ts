@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = process.env.PLAYWRIGHT_PORT ?? "3000";
+const port = process.env.PLAYWRIGHT_PORT ?? "3100";
 const baseURL = `http://localhost:${port}`;
 
 export default defineConfig({
@@ -22,7 +22,7 @@ export default defineConfig({
   webServer: {
     command: `npm run dev -- --webpack --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
     env: {
       AUTH_SECRET: "playwright-test-secret-must-be-at-least-32-bytes",
@@ -30,6 +30,7 @@ export default defineConfig({
       RP_ID: "localhost",
       RP_ORIGIN: baseURL,
       DATABASE_PATH: ".data/playwright.sqlite",
+      NEXT_DIST_DIR: ".next-test",
     },
   },
 });

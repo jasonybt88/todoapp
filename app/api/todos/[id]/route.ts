@@ -6,6 +6,8 @@ import {
   type UpdateTodoInput,
 } from "@/lib/db";
 import { errorResponse, readJsonObject } from "@/lib/http";
+import { isReminderMinutes } from "@/lib/reminders";
+import { parseSingaporeDateTime } from "@/lib/timezone";
 import {
   validateDueDate,
   validatePriority,
@@ -19,6 +21,8 @@ const allowedFields = new Set([
   "is_recurring",
   "recurrence_pattern",
   "reminder_minutes",
+  "last_notification_sent",
+  "notification_snapshot",
   "completed",
   "tag_ids",
 ]);
@@ -32,18 +36,24 @@ function isRecurrencePattern(value: unknown): value is RecurrencePattern {
   );
 }
 
-function isReminderMinutes(value: unknown): value is number | null {
-  return (
-    value === null ||
-    (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
-  );
-}
-
 function isTagIdList(value: unknown): value is number[] {
   return (
     Array.isArray(value) &&
     value.every((id) => Number.isSafeInteger(id) && id > 0)
   );
+}
+
+function isNotificationSnapshot(
+  value: unknown,
+): value is { due_date: string; reminder_minutes: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const snapshot = value as Record<string, unknown>;
+  return Object.keys(snapshot).length === 2 &&
+    typeof snapshot.due_date === "string" &&
+    parseSingaporeDateTime(snapshot.due_date) !== null &&
+    typeof snapshot.reminder_minutes === "number" &&
+    Number.isSafeInteger(snapshot.reminder_minutes) &&
+    snapshot.reminder_minutes > 0;
 }
 
 function parseId(value: string): number | null {
@@ -152,10 +162,46 @@ export async function PUT(
 
   if (Object.hasOwn(body, "reminder_minutes")) {
     const reminderMinutes = body.reminder_minutes;
-    if (!isReminderMinutes(reminderMinutes)) {
-      return errorResponse("reminder_minutes must be a non-negative integer or null", 400);
+    if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+      return errorResponse("reminder_minutes must be a supported preset or null", 400);
     }
     input.reminder_minutes = reminderMinutes;
+  }
+
+  if (Object.hasOwn(body, "last_notification_sent")) {
+    const value = body.last_notification_sent;
+    if (
+      typeof value !== "string" ||
+      !/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ||
+      !parseSingaporeDateTime(value)
+    ) {
+      return errorResponse("last_notification_sent must be an ISO timestamp with an offset", 400);
+    }
+    if (Object.hasOwn(body, "due_date") || Object.hasOwn(body, "reminder_minutes")) {
+      return errorResponse("Mark a notification separately from reminder changes", 400);
+    }
+    input.last_notification_sent = new Date(value).toISOString();
+  }
+
+  if (
+    (input.reminder_minutes === undefined ? existing.reminder_minutes : input.reminder_minutes) !== null &&
+    (input.due_date === undefined ? existing.due_date : input.due_date) === null
+  ) {
+    return errorResponse("A due date is required for a reminder", 400);
+  }
+
+  if (Object.hasOwn(body, "notification_snapshot")) {
+    const snapshot = body.notification_snapshot;
+    if (
+      !input.last_notification_sent ||
+      Object.keys(body).length !== 2 ||
+      !isNotificationSnapshot(snapshot)
+    ) {
+      return errorResponse("Invalid notification snapshot", 400);
+    }
+    const { due_date, reminder_minutes } = snapshot;
+    const marked = todoDB.markReminderSent(id, session.userId, due_date, reminder_minutes, input.last_notification_sent);
+    return marked ? NextResponse.json(marked) : errorResponse("Reminder changed or was already delivered", 409);
   }
 
   if (body.completed !== undefined) {
