@@ -11,9 +11,21 @@ export function createTodoClient({
   }
 
   const apiUrl = new URL("/api/todos", baseUrl);
+  const tagsUrl = new URL("/api/tags", baseUrl);
 
   function todoUrl(id) {
     return new URL(`${apiUrl.pathname}/${encodeURIComponent(id)}`, apiUrl.origin);
+  }
+
+  function tagUrl(id) {
+    return new URL(`${tagsUrl.pathname}/${encodeURIComponent(id)}`, tagsUrl.origin);
+  }
+
+  function todoTagsUrl(todoId) {
+    return new URL(
+      `${apiUrl.pathname}/${encodeURIComponent(todoId)}/tags`,
+      apiUrl.origin,
+    );
   }
 
   async function request(url, { method = "GET", body } = {}) {
@@ -53,6 +65,30 @@ export function createTodoClient({
     delete(id) {
       return request(todoUrl(id), {
         method: "DELETE",
+      });
+    },
+    listTags() {
+      return request(tagsUrl);
+    },
+    createTag(input) {
+      return request(tagsUrl, { method: "POST", body: input });
+    },
+    updateTag(id, input) {
+      return request(tagUrl(id), { method: "PUT", body: input });
+    },
+    deleteTag(id) {
+      return request(tagUrl(id), { method: "DELETE" });
+    },
+    attachTag(todoId, tagId) {
+      return request(todoTagsUrl(todoId), {
+        method: "POST",
+        body: { tag_id: tagId },
+      });
+    },
+    detachTag(todoId, tagId) {
+      return request(todoTagsUrl(todoId), {
+        method: "DELETE",
+        body: { tag_id: tagId },
       });
     },
   };

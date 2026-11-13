@@ -141,3 +141,89 @@ test("CLI recurrence options validate patterns and disable recurrence explicitly
     },
   );
 });
+
+test("CLI exposes shared tag routes with the session cookie", async () => {
+  const requests = [];
+  const client = createTodoClient({
+    baseUrl: "https://todo.example",
+    sessionToken: "session-token",
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  await client.listTags();
+  await client.createTag({ name: "Work", color: "#123456" });
+  await client.updateTag(4, { name: "Projects" });
+  await client.deleteTag(4);
+  await client.attachTag(12, 4);
+  await client.detachTag(12, 4);
+
+  assert.deepEqual(
+    requests.map(({ url, options }) => [url, options.method ?? "GET"]),
+    [
+      ["https://todo.example/api/tags", "GET"],
+      ["https://todo.example/api/tags", "POST"],
+      ["https://todo.example/api/tags/4", "PUT"],
+      ["https://todo.example/api/tags/4", "DELETE"],
+      ["https://todo.example/api/todos/12/tags", "POST"],
+      ["https://todo.example/api/todos/12/tags", "DELETE"],
+    ],
+  );
+  assert.equal(requests[0].options.headers.Cookie, "auth_session=session-token");
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    name: "Work",
+    color: "#123456",
+  });
+  assert.deepEqual(JSON.parse(requests[4].options.body), { tag_id: 4 });
+});
+
+test("CLI parses tag CRUD and idempotent association commands", async () => {
+  assert.deepEqual(
+    parseCommand(["tags", "create", "Work", "--color", "#123456"]),
+    {
+      command: "tags",
+      action: "create",
+      input: { name: "Work", color: "#123456" },
+    },
+  );
+  assert.deepEqual(
+    parseCommand(["tags", "update", "4", "--name", "Projects"]),
+    {
+      command: "tags",
+      action: "update",
+      id: "4",
+      input: { name: "Projects" },
+    },
+  );
+  assert.deepEqual(parseCommand(["tags", "attach", "12", "4"]), {
+    command: "tags",
+    action: "attach",
+    todoId: "12",
+    tagId: "4",
+  });
+  assert.deepEqual(parseCommand(["tags", "detach", "12", "4"]), {
+    command: "tags",
+    action: "detach",
+    todoId: "12",
+    tagId: "4",
+  });
+  assert.throws(() => parseCommand(["tags", "delete", "0"]), /positive integer/);
+
+  const calls = [];
+  const result = await executeCommand(
+    parseCommand(["tags", "attach", "12", "4"]),
+    {
+      attachTag: async (todoId, tagId) => {
+        calls.push([todoId, tagId]);
+        return { success: true };
+      },
+    },
+  );
+  assert.deepEqual(calls, [["12", "4"]]);
+  assert.deepEqual(result, { success: true });
+});

@@ -11,6 +11,9 @@ test("combines filters, preserves presets and clears immediately", async ({ page
     title: "Other meeting", priority: "low", due_date: "2099-01-05T10:00:00+08:00",
   } })).json();
   await page.request.put(`/api/todos/${second.id}`, { data: { completed: true } });
+  await page.route("**/api/tags", (route) => route.fulfill({
+    json: [{ id: 7, user_id: 1, name: "Work", color: "#123456", created_at: "2026-01-01" }],
+  }));
   await page.route("**/api/todos", async (route) => {
     const response = await route.fetch();
     const todos = await response.json();
@@ -29,7 +32,7 @@ test("combines filters, preserves presets and clears immediately", async ({ page
   await expect(page.getByText("Other meeting", { exact: true })).toBeVisible({ timeout: 250 });
   await search.fill("MEETING");
   await page.getByLabel("Filter by priority").selectOption("high");
-  await page.getByLabel("Filter by tag").selectOption("7");
+  await page.getByLabel("Filter by tag", { exact: true }).selectOption("7");
   await page.getByRole("button", { name: "Advanced" }).click();
   await page.getByLabel("Completion status").selectOption("incomplete");
   await page.getByLabel("Due date from").fill("2099-01-02");
@@ -51,7 +54,7 @@ test("combines filters, preserves presets and clears immediately", async ({ page
   await page.getByRole("button", { name: "Daily work", exact: true }).click();
   await expect(search).toHaveValue("MEETING");
   await expect(page.getByLabel("Filter by priority")).toHaveValue("high");
-  await expect(page.getByLabel("Filter by tag")).toHaveValue("7");
+  await expect(page.getByLabel("Filter by tag", { exact: true })).toHaveValue("7");
   await expect(page.getByLabel("Completion status")).toHaveValue("incomplete");
   await expect(page.getByLabel("Due date from")).toHaveValue("2099-01-02");
   await expect(page.getByLabel("Due date to")).toHaveValue("2099-01-02");
