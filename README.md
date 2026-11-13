@@ -23,6 +23,11 @@ npm run dev
 Open `http://localhost:3000/login` and register or log in with a passkey. There
 is no password fallback.
 
+Set a due date to choose a reminder, then use **Enable Notifications** to grant
+browser permission. Reminders are checked every 30 seconds while an app tab is
+open, including overdue reminders. They do not work with the browser closed;
+multiple tabs can occasionally produce duplicate notifications.
+
 ## Todo API
 
 Routes are `GET/POST /api/todos` and `GET/PUT/DELETE /api/todos/:id`. All

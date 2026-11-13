@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { todoDB, type CreateTodoInput, type Priority, type RecurrencePattern } from "@/lib/db";
 import { errorResponse, readJsonObject } from "@/lib/http";
+import { isReminderMinutes } from "@/lib/reminders";
 import { getSingaporeNow } from "@/lib/timezone";
 import { validateDueDate, validateTodoTitle } from "@/lib/todo";
 
@@ -25,13 +26,6 @@ function isRecurrencePattern(value: unknown): value is RecurrencePattern {
     value === "weekly" ||
     value === "monthly" ||
     value === "yearly"
-  );
-}
-
-function isReminderMinutes(value: unknown): value is number | null {
-  return (
-    value === null ||
-    (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
   );
 }
 
@@ -91,8 +85,11 @@ export async function POST(request: NextRequest) {
   }
 
   const reminderMinutes = body.reminder_minutes ?? null;
-  if (!isReminderMinutes(reminderMinutes)) {
-    return errorResponse("reminder_minutes must be a non-negative integer or null", 400);
+  if (reminderMinutes !== null && !isReminderMinutes(reminderMinutes)) {
+    return errorResponse("reminder_minutes must be a supported preset or null", 400);
+  }
+  if (reminderMinutes !== null && dueDate.value === null) {
+    return errorResponse("A due date is required for a reminder", 400);
   }
 
   const tagIds = body.tag_ids ?? [];

@@ -168,7 +168,7 @@ test("rejects unauthenticated requests and hides another user's todos", async ({
   });
 
   const secondContext = await browser.newContext({
-    baseURL: "http://localhost:3000",
+    baseURL: test.info().project.use.baseURL,
     timezoneId: "Asia/Singapore",
   });
   try {

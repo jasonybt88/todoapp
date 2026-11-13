@@ -160,7 +160,7 @@ button:disabled {
 
 .todo-form {
   display: grid;
-  grid-template-columns: minmax(12rem, 1fr) 8rem 13rem auto;
+  grid-template-columns: minmax(10rem, 1fr) 7rem 12rem 11rem auto;
   gap: 0.6rem;
   margin: 1rem 0 1.25rem;
 }
@@ -270,6 +270,37 @@ button:disabled {
   font-size: 0.75rem;
   font-weight: 700;
   text-transform: capitalize;
+}
+
+.reminder-badge {
+  color: #825308;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.notification-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.notifications-enable,
+.notifications-on {
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.6rem 0.8rem;
+  font-weight: 700;
+}
+
+.notifications-enable {
+  background: #d97706;
+  color: white;
+}
+
+.notifications-on {
+  background: #eaf8f0;
+  color: #17643b;
 }
 
 .priority-high {

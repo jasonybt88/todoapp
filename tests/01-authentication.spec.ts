@@ -45,7 +45,7 @@ test("registers passkeys on two devices, logs in, and preserves the session", as
   const secondContext = await createSignedInContext(browser, context);
   try {
     const secondPage = await secondContext.newPage();
-    await secondPage.goto("http://localhost:3000/");
+    await secondPage.goto("/");
     await addVirtualAuthenticator(secondContext, secondPage);
     await secondPage.getByRole("button", { name: "Add another passkey" }).click();
     await expect(secondPage.getByText("Passkey added")).toBeVisible({
@@ -105,7 +105,7 @@ async function createSignedInContext(
   sourceContext: BrowserContext,
 ): Promise<BrowserContext> {
   const context = await browser.newContext({
-    baseURL: "http://localhost:3000",
+    baseURL: test.info().project.use.baseURL,
     timezoneId: "Asia/Singapore",
   });
   await context.addCookies(await sourceContext.cookies());
