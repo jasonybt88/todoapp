@@ -74,6 +74,11 @@ export interface CreateSubtaskInput {
   title: string;
 }
 
+export interface UpdateSubtaskInput {
+  title?: string;
+  completed?: boolean;
+}
+
 export type ChallengePurpose = "registration" | "authentication";
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
@@ -538,6 +543,54 @@ export const subtaskDB = {
     });
 
     return create();
+  },
+
+  createForUser(todoId: number, userId: number, input: CreateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const owner = db.prepare("SELECT id FROM todos WHERE id = ? AND user_id = ?")
+        .get(todoId, userId);
+      return owner ? subtaskDB.create(todoId, input) : null;
+    })();
+  },
+
+  findByIdForUser(id: number, userId: number): Subtask | null {
+    const row = getDatabase().prepare(
+      `SELECT subtasks.id, subtasks.todo_id, subtasks.title, subtasks.completed,
+              subtasks.position, subtasks.created_at
+       FROM subtasks JOIN todos ON todos.id = subtasks.todo_id
+       WHERE subtasks.id = ? AND todos.user_id = ?`,
+    ).get(id, userId) as SubtaskRow | undefined;
+    return row ? mapSubtask(row) : null;
+  },
+
+  updateForUser(id: number, userId: number, input: UpdateSubtaskInput): Subtask | null {
+    const db = getDatabase();
+    return db.transaction(() => {
+      const fields: string[] = [];
+      const values: Array<string | number> = [];
+      if (input.title !== undefined) {
+        fields.push("title = ?");
+        values.push(input.title);
+      }
+      if (input.completed !== undefined) {
+        fields.push("completed = ?");
+        values.push(input.completed ? 1 : 0);
+      }
+      if (fields.length === 0) return subtaskDB.findByIdForUser(id, userId);
+      const result = db.prepare(
+        `UPDATE subtasks SET ${fields.join(", ")}
+         WHERE id = ? AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+      ).run(...values, id, userId);
+      return result.changes ? subtaskDB.findByIdForUser(id, userId) : null;
+    })();
+  },
+
+  deleteForUser(id: number, userId: number): boolean {
+    return getDatabase().prepare(
+      `DELETE FROM subtasks WHERE id = ?
+       AND EXISTS (SELECT 1 FROM todos WHERE todos.id = subtasks.todo_id AND todos.user_id = ?)`,
+    ).run(id, userId).changes === 1;
   },
 };
 

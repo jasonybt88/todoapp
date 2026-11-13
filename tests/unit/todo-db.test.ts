@@ -63,6 +63,32 @@ describe("todo persistence", () => {
   });
 });
 
+describe("subtask persistence", () => {
+  it("preserves position gaps, scopes mutations, and cascades parent deletion", () => {
+    const owner = createUser("subtask-owner");
+    const other = createUser("subtask-other");
+    const todo = database.todoDB.create(owner.id, { title: "Checklist" });
+    const first = database.subtaskDB.createForUser(todo.id, owner.id, { title: "First" });
+    const second = database.subtaskDB.createForUser(todo.id, owner.id, { title: "Second" });
+    expect(first?.position).toBe(0);
+    expect(second?.position).toBe(1);
+    if (!first || !second) throw new Error("Subtask creation failed");
+    expect(database.subtaskDB.createForUser(todo.id, other.id, { title: "Unauthorized" })).toBeNull();
+    expect(database.subtaskDB.updateForUser(first.id, other.id, { completed: true })).toBeNull();
+    expect(database.subtaskDB.deleteForUser(first.id, other.id)).toBe(false);
+    expect(database.subtaskDB.updateForUser(first.id, owner.id, { title: "Renamed", completed: true }))
+      .toMatchObject({ title: "Renamed", completed: true });
+    expect(database.subtaskDB.deleteForUser(first.id, owner.id)).toBe(true);
+    const third = database.subtaskDB.createForUser(todo.id, owner.id, { title: "Third" });
+    expect(third?.position).toBe(2);
+    expect(database.subtaskDB.findByTodoId(todo.id).map((item) => item.position)).toEqual([1, 2]);
+    expect(database.todoDB.findById(todo.id)?.completed).toBe(false);
+    database.todoDB.delete(todo.id);
+    expect(database.subtaskDB.findByTodoId(todo.id)).toEqual([]);
+    expect(database.subtaskDB.findByIdForUser(second.id, owner.id)).toBeNull();
+  });
+});
+
 describe("reminder persistence", () => {
   it("finds each preset at its exact Singapore date boundary, including overdue reminders", () => {
     const due = new Date("2026-03-01T16:00:00.000Z");
@@ -73,6 +99,7 @@ describe("reminder persistence", () => {
         due_date: due.toISOString(),
         reminder_minutes: minutes,
       });
+
       const boundary = due.getTime() - minutes * 60_000;
       expect(database.todoDB.findDueReminders(owner.id, new Date(boundary - 1))).toEqual([]);
       expect(database.todoDB.findDueReminders(owner.id, new Date(boundary)).map((item) => item.id))
